@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoxOps API tester</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 1080px; padding: 28px 20px; color: #20252b; background: #f6f7f8; font: 15px/1.5 system-ui, sans-serif; }
+    h1 { font-size: 26px; margin: 0; } h2 { font-size: 18px; margin: 0 0 12px; }
+    p { margin: 8px 0 16px; } .muted, small { color: #5c6670; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    section { min-width: 0; background: white; border: 1px solid #dce0e4; border-radius: 8px; padding: 20px; }
+    .wide { grid-column: 1 / -1; }
+    label { display: block; margin: 12px 0 5px; font-weight: 600; }
+    input:not([type=checkbox]), textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #b7c0c9; border-radius: 4px; font: inherit; background: white; color: inherit; }
+    textarea { resize: vertical; min-height: 75px; }
+    .check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+    input[type=checkbox] { width: 17px; height: 17px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    button { padding: 9px 13px; border: 1px solid #b7c0c9; border-radius: 4px; background: #fff; color: #20252b; font: inherit; cursor: pointer; }
+    button.primary { background: #245ad6; border-color: #245ad6; color: #fff; }
+    button.danger { color: #a82525; border-color: #d7aaaa; }
+    button:disabled { opacity: .55; cursor: wait; }
+    :focus-visible { outline: 3px solid #83aaff; outline-offset: 2px; }
+    #status { font-weight: 600; } #status[data-error=true] { color: #a82525; }
+    #summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre { max-height: 520px; overflow: auto; padding: 14px; background: #f3f5f7; border-radius: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 700px) { main { grid-template-columns: 1fr; } body { padding: 20px 12px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>VoxOps <span class="muted">/ API tester</span></h1>
+    <p class="muted">Local development tools. Fill in a form and see the response below. <a href="/docs">Swagger docs</a></p>
+  </header>
+  <main>
+    <section class="wide">
+      <h2>Repository</h2>
+      <label for="path">Local repository path</label>
+      <input id="path" value="." required maxlength="4096" aria-describedby="path-help">
+      <small id="path-help">Use a directory inside the server's allowed workspace roots. A dot means the server's working directory.</small>
+      <form data-action="analyze">
+        <label class="check"><input name="use_llm" type="checkbox"> Request optional AI analysis (requires a configured model)</label>
+        <label for="analysis-transcript">Transcript <span class="muted">(optional)</span></label>
+        <input id="analysis-transcript" name="transcript" maxlength="2000" placeholder="analyze this repository">
+        <div class="actions"><button class="primary" type="submit">Analyze repository</button></div>
+      </form>
+    </section>
+    <section>
+      <h2>Transcript</h2>
+      <form data-action="transcribe">
+        <label for="mode">Mode</label>
+        <select id="mode" name="mode"><option value="transcript">Development transcript</option><option value="gnani">Gnani — currently not configured</option></select>
+        <label for="text">Text — do not include credentials</label>
+        <textarea id="text" name="text" maxlength="2000">analyze this repository</textarea>
+        <label for="language">Language <span class="muted">(optional)</span></label>
+        <input id="language" name="language" placeholder="en-IN" maxlength="35" pattern="[a-zA-Z\-]+">
+        <div class="actions"><button type="submit">Test transcription</button></div>
+      </form>
+    </section>
+    <section>
+      <h2>Worktrees</h2>
+      <p class="muted">Create from the repository path above. Requires an existing commit; local edits are not copied.</p>
+      <form data-action="create-worktree"><button type="submit">Create worktree</button></form>
+      <form data-action="worktree">
+        <label for="worktree-id">Worktree ID</label>
+        <input id="worktree-id" name="identifier" list="worktree-options" pattern="[a-f0-9]{32}" placeholder="Filled automatically after creation">
+        <datalist id="worktree-options"></datalist>
+        <label class="check"><input name="discard_changes" type="checkbox"> Allow cleanup to discard changes and new commits in this temporary worktree</label>
+        <div class="actions">
+          <button type="submit" value="list" formnovalidate>List</button>
+          <button type="submit" value="inspect">Inspect</button>
+          <button type="submit" value="remove" class="danger">Remove worktree</button>
+        </div>
+      </form>
+    </section>
+    <section class="wide">
+      <form data-action="service" class="actions">
+        <button type="submit" value="health">Check health</button>
+        <button type="submit" value="ready">Check readiness</button>
+      </form>
+      <h2 style="margin-top:20px">Response</h2>
+      <p id="status" role="status" aria-live="polite">Ready to send a request.</p>
+      <div id="summary"></div>
+      <details><summary>Full JSON response</summary><pre id="response">No request yet.</pre></details>
+    </section>
+  </main>
+  <script>
+    // Why: Make API results understandable without reading the entire JSON contract.
+    // How: Summarize errors, detected units and warnings using text-only DOM output.
+    function summarize(data) {
+      if (data.error) return `${data.error.category}: ${data.error.message}`;
+      const lines = [];
+      if (data.detected_units) {
+        lines.push(`${data.detected_units.length} deployable unit(s) · ${data.deterministic_only ? 'deterministic analysis' : 'AI-assisted analysis'}`);
+        for (const unit of data.detected_units) lines.push(`${unit.root_path} — ${unit.framework} / ${unit.role}`);
+        lines.push(...data.unresolved_ambiguities);
+      } else if (Array.isArray(data)) {
+        lines.push(`${data.length} recorded worktree(s). Choose an ID above to inspect or remove.`);
+        for (const record of data) lines.push(`${record.id} — ${record.status}${record.dirty ? ' (has changes)' : ''}`);
+      } else if (data.provider) {
+        lines.push(`${data.provider}: ${data.text}`);
+      } else if (data.id) {
+        lines.push(`Worktree ${data.id}: ${data.status}${data.dirty ? ' (has changes)' : ''}`, data.location);
+      } else {
+        lines.push(JSON.stringify(data, null, 2));
+      }
+      lines.push(...(data.warnings || []));
+      return lines.join('\n');
+    }
+
+    // Why: Keep worktree IDs usable without copying them out of JSON responses.
+    // How: Fill the current ID after creation and populate suggestions from list responses.
+    function updateWorktrees(data) {
+      const records = Array.isArray(data) ? data : data.id && data.branch ? [data] : null;
+      if (!records) return;
+      if (!Array.isArray(data)) document.getElementById('worktree-id').value = data.id;
+      const options = document.getElementById('worktree-options');
+      options.replaceChildren();
+      for (const record of records) {
+        if (record.status === 'removed') continue;
+        const option = document.createElement('option');
+        option.value = record.id;
+        option.label = `${record.branch} (${record.status})`;
+        options.append(option);
+      }
+    }
+
+    // Why: Provide small, same-origin forms for every existing development API operation.
+    // How: Build endpoint payloads, prevent duplicate submissions and display safe response text.
+    async function submit(event) {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.dataset.action) return;
+      event.preventDefault();
+      const fields = new FormData(form);
+      const action = form.dataset.action;
+      const operation = event.submitter ? event.submitter.value : '';
+      let url = '', method = 'GET', body;
+      const path = document.getElementById('path');
+      if ((action === 'analyze' || action === 'create-worktree') && !path.reportValidity()) return;
+      if (action === 'analyze') {
+        url = '/api/v1/repositories/analyze'; method = 'POST';
+        body = {path: path.value, use_llm: fields.has('use_llm')};
+        if (fields.get('transcript').trim()) body.transcript = fields.get('transcript').trim();
+      } else if (action === 'create-worktree') {
+        url = '/api/v1/worktrees'; method = 'POST'; body = {path: path.value};
+      } else if (action === 'transcribe') {
+        url = '/api/v1/voice/transcribe'; method = 'POST';
+        body = {mode: fields.get('mode'), text: fields.get('text')};
+        if (fields.get('language')) body.language = fields.get('language');
+      } else if (action === 'service') {
+        url = operation === 'ready' ? '/ready' : '/health';
+      } else if (action === 'worktree') {
+        url = '/api/v1/worktrees';
+        if (operation !== 'list') {
+          const identifier = fields.get('identifier').trim();
+          if (!/^[a-f0-9]{32}$/.test(identifier)) {
+            document.getElementById('worktree-id').focus();
+            document.getElementById('status').textContent = 'Enter or choose a 32-character worktree ID.';
+            return;
+          }
+          url += '/' + encodeURIComponent(identifier);
+          if (operation === 'remove') {
+            method = 'DELETE';
+            url += '?discard_changes=' + fields.has('discard_changes');
+          }
+        }
+      } else return;
+      const status = document.getElementById('status');
+      const buttons = document.querySelectorAll('button');
+      for (const button of buttons) button.disabled = true;
+      status.textContent = `${method} ${url} — running…`;
+      status.dataset.error = 'false';
+      document.getElementById('summary').textContent = '';
+      document.getElementById('response').textContent = '';
+      try {
+        const response = await fetch(url, {method, headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+        const data = await response.json();
+        status.textContent = `${method} ${url} — HTTP ${response.status}`;
+        status.dataset.error = String(!response.ok);
+        document.getElementById('summary').textContent = summarize(data);
+        document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+        if (response.ok) updateWorktrees(data);
+      } catch {
+        status.textContent = 'Request failed. Check that the local API is running, then try again.';
+        status.dataset.error = 'true';
+      } finally {
+        for (const button of buttons) button.disabled = false;
+      }
+    }
+
+    document.addEventListener('submit', submit);
+  </script>
+</body>
+</html>

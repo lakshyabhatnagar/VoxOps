@@ -1,0 +1,1 @@
+{"name":"fixture-web","dependencies":{"react":"^19.0.0","vite":"^6.0.0","@fixture/shared":"workspace:*"},"scripts":{"build":"vite build"}}

@@ -1,0 +1,1 @@
+{"name":"fixture-next","dependencies":{"next":"^15.0.0","react":"^19.0.0"},"scripts":{"build":"next build","start":"next start"}}
