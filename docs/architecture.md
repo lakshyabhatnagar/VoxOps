@@ -38,6 +38,13 @@ results, model context, logs or persisted scans. Manifest commands outside a nar
 are redacted. No project install/build scripts run. Syntax matching is conservative rather than a
 JavaScript interpreter: dynamic configuration and SSR requirements remain review questions.
 
+Targeted startup-file reads also cover README fenced shell blocks and Docker's final-stage runtime
+instructions. Supported startup commands retain their source path and associated Alembic migration
+prerequisites in typed scan records. FastAPI prefers Procfile, matching README examples, Docker
+instructions, then inference; unrelated README targets are ignored. Preparation and startup commands
+are reported, never executed. Arbitrary shell chains, credential assignments and unknown option
+values are excluded rather than copied into results. Port placeholders retain their literal text.
+
 Framework adapters are a fixed registry: Next.js, React/Vite, FastAPI. Package ownership uses the
 nearest manifest. Node lockfiles are inherited from workspace ancestors. Python requirements and
 pyproject dependencies at the same root merge. Shared library builds do not become deployments;

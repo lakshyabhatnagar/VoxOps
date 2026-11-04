@@ -94,7 +94,13 @@
       const lines = [];
       if (data.detected_units) {
         lines.push(`${data.detected_units.length} deployable unit(s) · ${data.deterministic_only ? 'deterministic analysis' : 'AI-assisted analysis'}`);
-        for (const unit of data.detected_units) lines.push(`${unit.root_path} — ${unit.framework} / ${unit.role}`);
+        for (const unit of data.detected_units) {
+          lines.push(`${unit.root_path} — ${unit.framework} / ${unit.role}`);
+          if (unit.runtime?.prerequisite_commands?.length) {
+            lines.push('Before starting (not executed):', ...unit.runtime.prerequisite_commands);
+          }
+          if (unit.runtime?.start_command) lines.push(`Start (${unit.runtime.command_source}): ${unit.runtime.start_command}`);
+        }
         lines.push(...data.unresolved_ambiguities);
       } else if (Array.isArray(data)) {
         lines.push(`${data.length} recorded worktree(s). Choose an ID above to inspect or remove.`);

@@ -8,6 +8,20 @@ ENV_REFERENCE = re.compile(
     r"|(?:os\.getenv|os\.environ\.get)\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]"
     r"|(?:os\.environ|process\.env)\[\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]"
 )
+RUNNER = r"(?:(?:uv|poetry|pipenv) run )?"
+ASGI_TARGET = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*"
+PORT = r"""(?:\d+|\$PORT|\$\{PORT(?::-\d+)?\}|"\$\{PORT(?::-\d+)?\}"|'\$\{PORT(?::-\d+)?\}')"""
+HOST = r"(?:localhost|(?:\d{1,3}\.){3}\d{1,3})"
+ASGI_OPTION = (
+    r"(?:--factory|--reload|--no-access-log|--proxy-headers|--no-proxy-headers|--preload|"
+    r"(?:--workers|-w|--timeout) \d+|"
+    rf"--host {HOST}|--port {PORT}|(?:--bind|-b) {HOST}:\d+|"
+    r"(?:--worker-class|-k) (?:uvicorn\.workers|uvicorn_worker)\.UvicornWorker|"
+    r"--log-level (?:critical|error|warning|info|debug|trace)|"
+    r"--app-dir [A-Za-z_]\w*(?:/[A-Za-z_]\w*)*)"
+)
+ASGI_COMMAND = rf"{RUNNER}(?:python3? -m )?(?:uvicorn|gunicorn) {ASGI_TARGET}"
+MIGRATION_COMMAND = re.compile(rf"{RUNNER}alembic upgrade head")
 
 
 # Why: Extract configuration requirements without retaining values or source excerpts.
@@ -41,8 +55,8 @@ def safe_command(command: str) -> str:
     if not isinstance(command, str) or len(command) > 1000:
         return "[redacted command]"
     allowed = re.fullmatch(
-        r"(?:vite(?: build| preview)?|next(?: build| start| dev)?|"
-        r"(?:uvicorn|gunicorn) [\w./:-]+(?: (?:--[\w-]+|[0-9]+|0\.0\.0\.0))*|"
+        rf"(?:{ASGI_COMMAND}(?: {ASGI_OPTION})*|{MIGRATION_COMMAND.pattern}|"
+        r"vite(?: build| preview)?|next(?: build| start| dev)?|"
         r"(?:node|python|python3) [\w./-]+|react-scripts (?:build|start))",
         command.strip(),
     )

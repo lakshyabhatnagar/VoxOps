@@ -80,6 +80,13 @@ assert.equal(sent.url, '/api/v1/repositories/analyze');
 assert.deepEqual(JSON.parse(sent.body), {path: '/workspace/example', use_llm: true,
   transcript: 'analyze this repository'});
 assert.match(element('summary').textContent, /0 deployable unit/);
+nextResponse = {detected_units: [{root_path: '.', framework: 'fastapi', role: 'http_service',
+  runtime: {start_command: 'uv run uvicorn app.main:app --workers 1', command_source: 'explicit',
+    prerequisite_commands: ['uv run alembic upgrade head']}}],
+  unresolved_ambiguities: [], deterministic_only: true};
+await submit('analyze', [['transcript', '']]);
+assert.match(element('summary').textContent, /Before starting \(not executed\):\nuv run alembic upgrade head/);
+assert.match(element('summary').textContent, /Start \(explicit\): uv run uvicorn app.main:app --workers 1/);
 
 nextResponse = {id: 'a'.repeat(32), branch: 'voxops/test', status: 'active', location: '/tmp/test'};
 await submit('create-worktree');

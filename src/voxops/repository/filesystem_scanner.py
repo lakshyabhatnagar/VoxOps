@@ -15,6 +15,7 @@ from voxops.repository.env_inspector import config_names
 from voxops.repository.git_inspector import inspect_git
 from voxops.repository.manifest_reader import read_manifest
 from voxops.repository.path_policy import fingerprint
+from voxops.repository.startup_reader import STARTUP_FILES, read_startup
 
 DENIED = {
     ".git",
@@ -52,6 +53,7 @@ CONFIG_NAMES = {
     "uv.lock",
     "poetry.lock",
     "Procfile",
+    "README.md",
 }
 SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}
 
@@ -183,6 +185,20 @@ def fastapi_entries(text: str) -> list[tuple[str, str]]:
             for node in statements
         ):
             entries.add(("fastapi_factory", owner))
+    factories = {name for kind, name in entries if kind == "fastapi_factory"}
+    for node in tree.body:
+        if (
+            isinstance(node, (ast.Assign, ast.AnnAssign))
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id in factories
+        ):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            entries.update(
+                ("fastapi_instance", target.id)
+                for target in targets
+                if isinstance(target, ast.Name)
+            )
     return sorted(entries)
 
 
@@ -227,6 +243,7 @@ def source_evidence(path: str, text: str) -> list[Evidence]:
 def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) -> RepoScan:
     files, warnings = bounded_files(root, settings)
     manifests, evidence, relevant, config_keys = [], [], [], {}
+    startup_commands = []
     digest = hashlib.sha256()
     for file in files:
         relative = file.relative_to(root).as_posix()
@@ -242,7 +259,7 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
         if not targeted:
             continue
         relevant.append(relative)
-        if name in CONFIG_NAMES and name != "Procfile":
+        if name in CONFIG_NAMES and name not in STARTUP_FILES:
             metadata = file.stat()
             digest.update(f"{relative}:{metadata.st_size}:{metadata.st_mtime_ns}".encode())
             continue
@@ -263,18 +280,8 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
                     config_keys[relative] = keys
             if source:
                 evidence.extend(source_evidence(relative, text))
-            if name == "Procfile":
-                from voxops.repository.env_inspector import safe_command
-
-                for line in text.splitlines():
-                    if line.startswith("web:"):
-                        command = safe_command(line[4:].strip())
-                        if command != "[redacted command]":
-                            evidence.append(
-                                Evidence(
-                                    path=relative, kind="start_command", field=command, confidence=1
-                                )
-                            )
+            if name in STARTUP_FILES:
+                startup_commands.extend(read_startup(relative, text))
         except (OSError, ValueError, TypeError, AttributeError, RecursionError):
             warnings.append(f"Skipped unreadable, oversized or malformed file: {relative}")
     metadata = inspect_git(root)
@@ -300,6 +307,7 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
                 }
             ),
             evidence=evidence,
+            startup_commands=startup_commands,
             config_keys=config_keys,
             warnings=sorted(set(warnings)),
             input_fingerprint=digest.hexdigest(),

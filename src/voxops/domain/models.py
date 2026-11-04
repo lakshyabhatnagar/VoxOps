@@ -72,6 +72,7 @@ class RuntimeSpec(Model):
     dependency_files: list[str] = Field(default_factory=list)
     build_command: str | None = None
     start_command: str | None = None
+    prerequisite_commands: list[str] = Field(default_factory=list)
     command_source: Literal["explicit", "inferred", "unknown"] = "unknown"
     output_directory: str | None = None
     workspace_root: str | None = None
@@ -135,6 +136,14 @@ class ManifestSummary(Model):
     server_build: bool = False
 
 
+# Why: Associate a discovered startup command with its source and required preparation.
+# How: Keep sanitized command text and ordered prerequisites together without executing them.
+class StartupCommand(Model):
+    path: str
+    command: str
+    prerequisite_commands: list[str] = Field(default_factory=list)
+
+
 # Why: Keep the bounded scanner result reproducible and usable independently of detection.
 # How: Collect relative file metadata and safe facts with input revision fingerprints.
 class RepoScan(Model):
@@ -152,6 +161,7 @@ class RepoScan(Model):
     warnings: list[str] = Field(default_factory=list)
     input_fingerprint: str
     workspace_roots: list[str] = Field(default_factory=list)
+    startup_commands: list[StartupCommand] = Field(default_factory=list)
 
 
 # Why: Account for optional model use without saving prompts or credentials.

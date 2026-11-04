@@ -9,30 +9,38 @@ from voxops.domain.models import (
     Role,
     RuntimeSpec,
 )
-from voxops.frameworks.base import facts
+from voxops.frameworks.base import facts, owns
 from voxops.frameworks.registry import make_unit, package_manager
+from voxops.repository.startup_reader import startup_target
 
 
 # Why: Detect Python HTTP services without importing or instantiating applications.
 # How: Combine dependency declarations, constructor syntax and explicit ASGI commands.
 class FastAPIAdapter:
     # Why: Infer only credible application startup metadata for a Python package.
-    # How: Prefer Procfile commands and derive module paths solely from proven app instances.
+    # How: Prefer scoped existing commands and use proven source declarations only as a fallback.
     def detect(self, manifest: ManifestSummary, scan: RepoScan) -> DeployableUnit | None:
         if manifest.kind != "python":
             return None
         local = facts(manifest, scan)
         instances = [item for item in local if item.kind in {"fastapi_instance", "fastapi_factory"}]
-        explicit = [
-            item
-            for item in local
-            if item.kind == "start_command"
-            and (
-                item.field.startswith(("uvicorn ", "gunicorn "))
-                or instances
-                and item.field.startswith(("python ", "python3 "))
-            )
-        ]
+        targets = set()
+        for instance in instances:
+            path = PurePosixPath(instance.path).relative_to(manifest.root_path).with_suffix("")
+            parts = path.parts[1:] if path.parts[0] == "src" else path.parts
+            targets.add(f"{'.'.join(parts)}:{instance.field}")
+        explicit = []
+        for candidate in scan.startup_commands:
+            if not owns(manifest.root_path, candidate.path, scan):
+                continue
+            target = startup_target(candidate.command)
+            if target in targets or (
+                PurePosixPath(candidate.path).name in {"Procfile", "Dockerfile"}
+                and (target or instances)
+            ):
+                explicit.append(candidate)
+        priority = {"Procfile": 0, "README.md": 1, "Dockerfile": 2}
+        explicit.sort(key=lambda item: priority.get(PurePosixPath(item.path).name, 3))
         if "fastapi" not in manifest.dependencies and not instances:
             return None
         if manifest.workspace and not instances:
@@ -58,10 +66,39 @@ class FastAPIAdapter:
         questions = []
         commands = explicit
         if commands:
-            runtime.start_command = commands[0].field
+            selected = commands[0]
+            runtime.start_command = selected.command
+            runtime.prerequisite_commands = selected.prerequisite_commands
             runtime.command_source = "explicit"
-            evidence += commands
-        elif len(instances) == 1:
+            evidence.append(
+                Evidence(
+                    path=selected.path, kind="start_command", field=selected.command, confidence=1
+                )
+            )
+            evidence.extend(
+                Evidence(
+                    path=selected.path, kind="startup_prerequisite", field=command, confidence=1
+                )
+                for command in selected.prerequisite_commands
+            )
+            alternatives = {
+                item.command
+                for item in explicit
+                if item.path == selected.path and item.command != selected.command
+            }
+            if alternatives:
+                questions.append(
+                    "Several startup commands match this app; confirm the selected example."
+                )
+        else:
+            # A factory and its exported app describe the same module; prefer the exported object.
+            exported_paths = {item.path for item in instances if item.kind == "fastapi_instance"}
+            instances = [
+                item
+                for item in instances
+                if item.kind == "fastapi_instance" or item.path not in exported_paths
+            ]
+        if not commands and len(instances) == 1:
             relative = (
                 PurePosixPath(instances[0].path).relative_to(manifest.root_path).with_suffix("")
             )

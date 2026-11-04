@@ -22,6 +22,15 @@ Open **http://127.0.0.1:8000/** for the minimal API tester: analyze a local path
 check health/readiness, and create, inspect or clean up worktrees using forms and readable results.
 The full response JSON is expandable. No frontend install or build step is needed.
 
+FastAPI startup detection prefers a scoped `Procfile` command, then a README shell-code example
+matching a detected app, then a final-stage Docker startup command, and finally source inference.
+It preserves supported runners and server flags, recognizes exported factory results such as
+`app = create_app()`, and reports documented Alembic migrations in `runtime.prerequisite_commands`.
+The tester displays these prerequisites before the startup command. Commands are metadata only;
+scanning never installs dependencies, applies migrations or starts the target app. Only a narrow
+set of commands/options is read; arbitrary scripts and complex shell expressions are not interpreted.
+Conflicting examples in the selected source are reported as a question.
+
 For command-line testing, in another terminal:
 
 ```sh
