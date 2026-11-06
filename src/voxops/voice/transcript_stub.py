@@ -5,8 +5,8 @@ from voxops.core.errors import AppError
 from voxops.domain.models import VoiceTranscript
 
 
-# Why: Prevent the development transcript path from becoming a credential-entry workflow.
-# How: Reject obvious secret assignments and key/token formats before returning text.
+# Checks development transcript text before returning it.
+# Rejects obvious secret assignments and key or token patterns.
 def validate_transcript(text: str | None) -> str:
     if not text or not text.strip() or len(text) > 2000:
         raise AppError(
@@ -22,11 +22,11 @@ def validate_transcript(text: str | None) -> str:
     return text.strip()
 
 
-# Why: Provide an honest executable development mode without claiming live speech recognition.
-# How: Validate supplied text and label every result transcript_stub with no synthetic confidence.
+# Provides text input for development without speech recognition.
+# Checks the supplied transcript and labels the result as a stub.
 class TranscriptStub:
-    # Why: Demonstrate the ordinary-text boundary without network or audio persistence.
-    # How: Reject audio and pass validated text into the shared transcript model.
+    # Returns a supplied development transcript.
+    # Rejects audio and validates the text before creating the result.
     async def transcribe(
         self, *, audio: bytes | None = None, text: str | None = None, language: str | None = None
     ) -> VoiceTranscript:

@@ -87,8 +87,8 @@
     </section>
   </main>
   <script>
-    // Why: Make API results understandable without reading the entire JSON contract.
-    // How: Summarize errors, detected units and warnings using text-only DOM output.
+    // Turns the API response into a short explanation shown above the full JSON.
+    // Displays any error, detected applications, and warnings as ordinary text.
     function summarize(data) {
       if (data.error) return `${data.error.category}: ${data.error.message}`;
       const lines = [];
@@ -116,8 +116,8 @@
       return lines.join('\n');
     }
 
-    // Why: Keep worktree IDs usable without copying them out of JSON responses.
-    // How: Fill the current ID after creation and populate suggestions from list responses.
+    // Copies a newly created working-folder ID into the form so you do not have to paste it.
+    // Also updates the list of IDs available for inspection and cleanup.
     function updateWorktrees(data) {
       const records = Array.isArray(data) ? data : data.id && data.branch ? [data] : null;
       if (!records) return;
@@ -133,8 +133,8 @@
       }
     }
 
-    // Why: Provide small, same-origin forms for every existing development API operation.
-    // How: Build endpoint payloads, prevent duplicate submissions and display safe response text.
+    // Sends the selected form to the matching VoxOps API and displays its response.
+    // Disables buttons during the request and enables them again when it finishes.
     async function submit(event) {
       const form = event.target;
       if (!(form instanceof HTMLFormElement) || !form.dataset.action) return;

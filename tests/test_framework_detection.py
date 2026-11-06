@@ -17,8 +17,8 @@ from voxops.repository.filesystem_scanner import scan_repository
         ("monorepo_shared_package", ["react_vite"], ["static_frontend"]),
     ],
 )
-# Why: Protect valid topologies from forced pairing or library deployment.
-# How: Scan real fixture layouts and assert exact frameworks, roles and stable repeated-scan IDs.
+# Scan the sample repositories and classify their applications.
+# Check their frameworks and roles, including stable IDs on a repeated scan.
 def test_fixture_classification(tmp_path, fixture, frameworks, roles):
     root = copy_fixture(tmp_path, fixture)
     settings = settings_for(tmp_path)
@@ -39,8 +39,8 @@ def test_fixture_classification(tmp_path, fixture, frameworks, roles):
         assert first[1].runtime.lockfile_path == "pnpm-lock.yaml"
 
 
-# Why: Distinguish explicit static exports from Next's server default without hiding conflicts.
-# How: Mutate one fixture's config and compare static, SSR and conflicting API classifications.
+# Change a Next.js sample between static and server configurations.
+# Check that detection reports the right kind of app and any conflict.
 def test_next_export_and_server_precedence(tmp_path):
     root = copy_fixture(tmp_path, "nextjs_fullstack")
     route = root / "app/api/hello/route.ts"
@@ -58,8 +58,8 @@ def test_next_export_and_server_precedence(tmp_path):
     assert detect_units(scan_repository(root, settings))[0].role == "server_rendered_web"
 
 
-# Why: Recognize exported factories without inventing importable module-level app variables.
-# How: Prove a returned constructor instance and infer the explicit Uvicorn factory form.
+# Scan a FastAPI app created by a local factory.
+# Check that startup detection uses the factory without inventing a module-level app.
 def test_fastapi_local_factory_does_not_invent_module_app(tmp_path):
     (tmp_path / "requirements.txt").write_text("fastapi\n")
     (tmp_path / "factory.py").write_text(
@@ -74,8 +74,8 @@ def test_fastapi_local_factory_does_not_invent_module_app(tmp_path):
     assert detect_units(scan_repository(tmp_path, settings_for(tmp_path))) == []
 
 
-# Why: Preserve Vite CLI output overrides and avoid calling an SSR build static.
-# How: Scan explicit and dynamic output flags plus a server build in the same real fixture.
+# Change the Vite build command and its output options.
+# Check that detection respects the output path and recognizes server builds.
 def test_vite_script_overrides_and_ssr(tmp_path):
     root = copy_fixture(tmp_path, "vite_only")
     manifest = root / "package.json"

@@ -58,8 +58,8 @@ CONFIG_NAMES = {
 SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}
 
 
-# Why: Avoid mistaking commented-out framework settings for deterministic configuration.
-# How: Remove JS comments while preserving quoted literals for bounded syntax matching.
+# Removes JavaScript comments before checking configuration.
+# Keeps quoted strings intact so their contents are not mistaken for comments.
 def strip_js_comments(text: str) -> str:
     return re.sub(
         r"""("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|//[^\n]*|/\*[\s\S]*?\*/""",
@@ -68,14 +68,14 @@ def strip_js_comments(text: str) -> str:
     )
 
 
-# Why: Keep literal content intact while removing only comment tokens.
-# How: Return the captured quoted token or whitespace for a comment match.
+# Handles one match while removing JavaScript comments.
+# Returns quoted text unchanged and replaces a comment with whitespace.
 def keep_literal(match: re.Match) -> str:
     return match.group(1) or " "
 
 
-# Why: Bound traversal cost while ignoring sensitive/generated directories and symbolic links.
-# How: Walk a depth-limited deterministic directory queue with a global entry budget.
+# Lists project files within the scanner's limits.
+# Skips links and excluded directories while limiting depth and entries.
 def bounded_files(root: Path, settings: Settings) -> tuple[list[Path], list[str]]:
     pending = [(root, 0)]
     files, warnings = [], []
@@ -108,8 +108,8 @@ def bounded_files(root: Path, settings: Settings) -> tuple[list[Path], list[str]
     return sorted(files), sorted(set(warnings))
 
 
-# Why: Avoid following final-file symlinks or reading devices, FIFOs or oversized inputs.
-# How: Open with no-follow where supported, verify file metadata and cap bytes read.
+# Reads a regular project file within the size limit.
+# Checks the file and avoids following a final symbolic link.
 def read_bounded(path: Path, limit: int) -> str:
     descriptor = os.open(
         path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -124,8 +124,8 @@ def read_bounded(path: Path, limit: int) -> str:
     return content.decode("utf-8")
 
 
-# Why: Recognize exported FastAPI apps and simple factories without importing user code.
-# How: Resolve constructor aliases and prove module assignments or zero-argument factory returns.
+# Finds FastAPI application names in Python source.
+# Looks for where apps are created or returned by functions without running the code.
 def fastapi_entries(text: str) -> list[tuple[str, str]]:
     try:
         tree = ast.parse(text)
@@ -202,8 +202,8 @@ def fastapi_entries(text: str) -> list[tuple[str, str]]:
     return sorted(entries)
 
 
-# Why: Reduce source/config to explicit safe facts instead of retaining arbitrary source text.
-# How: Extract only framework flags, literal output paths and application variable names.
+# Extracts framework clues from source and configuration files.
+# Keeps selected flags, output paths and application names instead of whole files.
 def source_evidence(path: str, text: str) -> list[Evidence]:
     facts: list[tuple[str, str]] = []
     if not path.endswith(".py"):
@@ -238,8 +238,8 @@ def source_evidence(path: str, text: str) -> list[Evidence]:
     return [Evidence(path=path, kind=kind, field=field, confidence=0.95) for kind, field in facts]
 
 
-# Why: Gather bounded repository intelligence without executing code or exposing secret values.
-# How: Inspect targeted files, extract safe facts and hash inputs for revision tracking.
+# Collects facts needed to analyze a project.
+# Reads selected files within limits and records checksums for later comparison.
 def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) -> RepoScan:
     files, warnings = bounded_files(root, settings)
     manifests, evidence, relevant, config_keys = [], [], [], {}

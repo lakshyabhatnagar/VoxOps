@@ -25,8 +25,8 @@ LOCK_MANAGERS = {
 }
 
 
-# Why: Preserve package-manager evidence inherited from workspace ancestors.
-# How: Prefer explicit package metadata, then the nearest compatible lockfile.
+# Finds the package manager used by a project unit.
+# Checks package metadata first and then nearby lockfiles.
 def package_manager(manifest: ManifestSummary, scan: RepoScan) -> str:
     if manifest.package_manager:
         return manifest.package_manager
@@ -52,8 +52,8 @@ def package_manager(manifest: ManifestSummary, scan: RepoScan) -> str:
     return "pip" if manifest.kind == "python" else "npm"
 
 
-# Why: Keep configuration names scoped to units while inheriting root example declarations.
-# How: Merge owned source references and ancestor env keys with strongest presence winning.
+# Collects configuration names relevant to a project unit.
+# Combines references in its files with declarations inherited from parent directories.
 def unit_config(manifest: ManifestSummary, scan: RepoScan) -> list[ConfigRequirement]:
     keys = {}
     priority = {"unknown": 0, "referenced": 1, "example_only": 2, "present": 3}
@@ -72,8 +72,8 @@ def unit_config(manifest: ManifestSummary, scan: RepoScan) -> list[ConfigRequire
     return [keys[key] for key in sorted(keys)]
 
 
-# Why: Build consistent deterministic unit contracts for all independent adapters.
-# How: Derive IDs from normalized root/role and combine scoped config with adapter evidence.
+# Builds a project unit from framework evidence.
+# Combines its location and role with configuration names and detected details.
 def make_unit(
     manifest: ManifestSummary,
     scan: RepoScan,
@@ -125,8 +125,8 @@ def make_unit(
     )
 
 
-# Why: Assemble framework detection without coupling adapters to combinations or cloud services.
-# How: Run fixed adapters on consolidated manifests, taking the first match.
+# Finds supported framework units in scanned packages.
+# Tries the framework adapters in order and keeps the first match per package.
 def detect_units(scan: RepoScan) -> list[DeployableUnit]:
     from voxops.frameworks.fastapi import FastAPIAdapter
     from voxops.frameworks.nextjs import NextJSAdapter

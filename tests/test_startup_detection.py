@@ -8,8 +8,8 @@ from voxops.repository.filesystem_scanner import scan_repository
 
 
 @pytest.fixture
-# Why: Reproduce AEREO's exported application and factory without running project code.
-# How: Create a small Python package whose documented startup differs from factory inference.
+# Create a small Python application with an exported app and a factory.
+# Return its folder for startup command detection tests.
 def application(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "example"\nversion = "0.1.0"\ndependencies = ["fastapi", "uvicorn"]\n'
@@ -26,8 +26,8 @@ def application(tmp_path):
     return tmp_path
 
 
-# Why: Prefer AEREO's documented command and retain its migration prerequisite.
-# How: Scan README and Docker alternatives, then assert the local README command wins.
+# Add documented startup and migration commands to a sample app.
+# Check that detection chooses the local startup command and keeps the migration.
 def test_documented_local_startup_and_migration(application):
     (application / "README.md").write_text(
         "# Example\n## Run locally\n```bash\nuv sync --locked --python 3.12\n"
@@ -50,8 +50,8 @@ def test_documented_local_startup_and_migration(application):
     assert "scanner must not execute" not in scan.model_dump_json()
 
 
-# Why: Recognize an exported factory result and preserve the existing Procfile precedence.
-# How: Compare source-only inference with a Procfile command alongside a different README command.
+# Scan an exported app with both a Procfile and README commands.
+# Check that the Procfile command takes precedence.
 def test_exported_app_and_procfile_precedence(application):
     settings = settings_for(application)
     unit = detect_units(scan_repository(application, settings))[0]
@@ -66,8 +66,8 @@ def test_exported_app_and_procfile_precedence(application):
 
 
 @pytest.mark.parametrize("shell", [False, True])
-# Why: Read Docker startup metadata without confusing build instructions with runtime commands.
-# How: Test final-stage exec and shell CMD forms, including a migration and PORT placeholder.
+# Add Docker startup commands in several supported forms.
+# Check that detection reads the final runtime command and migration.
 def test_docker_startup(application, shell):
     command = 'uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-10000}" --workers 1'
     payload = (
@@ -85,8 +85,8 @@ def test_docker_startup(application, shell):
     assert unit.runtime.prerequisite_commands == (["alembic upgrade head"] if shell else [])
 
 
-# Why: Keep README commands scoped to proven targets and exclude credentials and shell side effects.
-# How: Mix unrelated examples and unsafe commands with a valid fenced startup block.
+# Mix unrelated examples and unsafe commands with a valid startup command.
+# Check that detection selects the right command without exposing secrets or running code.
 def test_startup_redaction_and_scope(application):
     marker = application / "executed"
     secret = "sensitive-startup-sentinel"

@@ -19,22 +19,22 @@ router = APIRouter()
 
 
 @router.get("/", response_class=FileResponse, include_in_schema=False)
-# Why: Make local API testing accessible without hand-authoring requests in Swagger.
-# How: Serve the packaged buildless test page under the existing loopback security boundary.
+# Serves the local page for trying the API.
+# Returns the packaged page through the local service.
 def api_tester() -> FileResponse:
     return FileResponse(Path(__file__).resolve().parents[1] / "static" / "index.html")
 
 
 @router.get("/health", response_model=HealthResponse)
-# Why: Offer a cheap liveness probe independent of filesystem and cloud services.
-# How: Return the running package version in a typed fixed-status response.
+# Reports whether the application is running.
+# Returns a fixed status and the installed version.
 def health() -> HealthResponse:
     return HealthResponse(version=__version__)
 
 
 @router.get("/ready", response_model=ReadyResponse)
-# Why: Confirm deterministic analysis prerequisites without requiring model or STT credentials.
-# How: Probe local storage and configured roots, using 503 only for necessary local failures.
+# Checks whether the application can perform local analysis.
+# Tests storage and workspace access without requiring optional service credentials.
 def ready(request: Request, response: Response) -> ReadyResponse:
     storage = request.app.state.store.ready()
     workspaces = all(root.is_dir() for root in request.app.state.settings.allowed_roots)
@@ -44,8 +44,8 @@ def ready(request: Request, response: Response) -> ReadyResponse:
 
 
 @router.post("/api/v1/repositories/analyze", response_model=AnalysisResult)
-# Why: Analyze local repositories through the bounded Stage 1 graph.
-# How: Validate optional text without storing it and delegate only the path/model option.
+# Analyzes a local project directory.
+# Checks the request and passes the directory and model choice to the analysis service.
 async def analyze(body: AnalyzeRequest, request: Request) -> AnalysisResult:
     if body.transcript is not None:
         validate_transcript(body.transcript)
@@ -53,29 +53,29 @@ async def analyze(body: AnalyzeRequest, request: Request) -> AnalysisResult:
 
 
 @router.post("/api/v1/worktrees", response_model=WorktreeRecord, status_code=201)
-# Why: Make temporary committed-content isolation explicit and reviewable.
-# How: Delegate source validation and branch ownership to the safe local manager.
+# Creates a separate working copy of committed project files.
+# Checks the source and assigns a branch through the worktree manager.
 def create_worktree(body: WorktreeRequest, request: Request) -> WorktreeRecord:
     return request.app.state.worktrees.create(body.path)
 
 
 @router.get("/api/v1/worktrees", response_model=list[WorktreeRecord])
-# Why: Let developers inspect the application's owned isolation workspaces.
-# How: List only recorded worktrees with current Git status.
+# Lists the working copies managed by this application.
+# Returns their recorded details and current Git status.
 def list_worktrees(request: Request) -> list[WorktreeRecord]:
     return request.app.state.worktrees.list()
 
 
 @router.get("/api/v1/worktrees/{identifier}", response_model=WorktreeRecord)
-# Why: Report one worktree's source revision and live lifecycle metadata.
-# How: Verify its ownership record before inspecting Git status.
+# Returns the details of one managed working copy.
+# Checks its ownership record before reading its Git status.
 def inspect_worktree(identifier: str, request: Request) -> WorktreeRecord:
     return request.app.state.worktrees.inspect(identifier)
 
 
 @router.delete("/api/v1/worktrees/{identifier}", response_model=WorktreeRecord)
-# Why: Require an explicit cleanup policy before discarding isolated changes.
-# How: Default to clean-only removal and pass the explicit dirty-discard query flag.
+# Removes a working copy managed by this application.
+# Requires an explicit choice before discarding uncommitted changes.
 def remove_worktree(
     identifier: str, request: Request, discard_changes: bool = Query(default=False)
 ) -> WorktreeRecord:
@@ -83,8 +83,8 @@ def remove_worktree(
 
 
 @router.post("/api/v1/voice/transcribe", response_model=VoiceTranscript)
-# Why: Demonstrate plain text STT output while reporting unavailable live integration honestly.
-# How: Select the transcript stub or explicit Gnani configuration-error adapter.
+# Returns text using the requested speech provider.
+# Uses the supplied transcript in development mode or reports missing Gnani setup.
 async def transcribe(body: TranscribeRequest) -> VoiceTranscript:
     provider = TranscriptStub() if body.mode == "transcript" else GnaniSpeechToText()
     return await provider.transcribe(text=body.text, language=body.language)

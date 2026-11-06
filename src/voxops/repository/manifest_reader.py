@@ -7,8 +7,8 @@ from voxops.domain.models import ManifestSummary
 from voxops.repository.env_inspector import safe_command
 
 
-# Why: Normalize dependency identifiers while discarding versions, URLs and credentials.
-# How: Extract package-name prefixes from dependency declarations only.
+# Extracts package names from dependency declarations.
+# Drops version information, addresses and credentials.
 def dependency_names(values: list[str]) -> list[str]:
     return sorted(
         {
@@ -19,8 +19,8 @@ def dependency_names(values: list[str]) -> list[str]:
     )
 
 
-# Why: Parse targeted dependency files without executing build hooks or package code.
-# How: Use JSON/TOML/text parsers and return a small value-sanitized manifest summary.
+# Reads dependency information from a supported manifest.
+# Parses the file without running its build scripts or package code.
 def read_manifest(path: str, text: str) -> ManifestSummary | None:
     name = PurePosixPath(path).name
     root = str(PurePosixPath(path).parent)
@@ -29,7 +29,6 @@ def read_manifest(path: str, text: str) -> ManifestSummary | None:
         dependencies = {}
         for field in ("dependencies", "devDependencies", "peerDependencies"):
             dependencies.update(data.get(field, {}))
-        # Only framework and syntactically valid package identifiers reach summaries.
         names = sorted(key for key in dependencies if re.fullmatch(r"[@\w./-]+", key))
         manager = str(data.get("packageManager", "")).split("@")[0]
         version = data.get("engines", {}).get("node")

@@ -6,8 +6,8 @@ from voxops.voice.gnani import GnaniNotConfigured, GnaniSpeechToText
 from voxops.voice.transcript_stub import TranscriptStub
 
 
-# Why: Distinguish development transcripts from genuine live Gnani recognition.
-# How: Assert exact typed stub metadata and explicit configuration failure for live audio.
+# Request a sample transcript and try the live voice service without configuration.
+# Check the transcript details and the error for the unavailable service.
 def test_voice_contract():
     transcript = asyncio.run(
         TranscriptStub().transcribe(text="analyze this repository", language="en-IN")
@@ -19,8 +19,8 @@ def test_voice_contract():
     assert failure.value.category == "gnani_not_configured"
 
 
-# Why: Keep obvious spoken credentials out of text responses and downstream workflows.
-# How: Reject secret-shaped text instead of echoing it through the transcript model.
+# Send text that looks like a credential to the transcript service.
+# Check that the service rejects it rather than returning the secret.
 def test_transcript_rejects_secret_input():
     from voxops.core.errors import AppError
 

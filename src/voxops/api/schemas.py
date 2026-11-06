@@ -5,37 +5,37 @@ from pydantic import Field
 from voxops.domain.models import Model
 
 
-# Why: Keep analysis inputs narrow and avoid remote repository or execution options.
-# How: Accept a bounded local path, explicit model preference and optional development text.
+# Holds the inputs for analyzing a local project.
+# Includes its path, model preference and optional development text.
 class AnalyzeRequest(Model):
     path: str = Field(min_length=1, max_length=4096)
     use_llm: bool = False
     transcript: str | None = Field(default=None, max_length=2000)
 
 
-# Why: Make worktree creation independent from analysis and deployment.
-# How: Accept only a verified local source directory path.
+# Holds the source directory for a new working copy.
+# Accepts a local path for the worktree manager to check.
 class WorktreeRequest(Model):
     path: str = Field(min_length=1, max_length=4096)
 
 
-# Why: Expose honest development transcript mode while live transport remains unconfigured.
-# How: Validate the mode and accept no speculative audio encoding or response schema.
+# Holds the requested transcription mode and development text.
+# Checks the mode without assuming a live audio format.
 class TranscribeRequest(Model):
     mode: Literal["transcript", "gnani"] = "transcript"
     text: str | None = Field(default=None, max_length=2000)
     language: str | None = Field(default=None, max_length=35, pattern=r"^[a-zA-Z-]+$")
 
 
-# Why: Keep health responses lightweight and stable.
-# How: Return a version and fixed status without checking optional external services.
+# Holds the application's basic health response.
+# Returns its version and a fixed status.
 class HealthResponse(Model):
     status: Literal["ok"] = "ok"
     version: str
 
 
-# Why: Report local prerequisites independently of optional Anthropic and Gnani access.
-# How: Expose only storage/workspace readiness and explicit live STT availability.
+# Holds the results of local readiness checks.
+# Reports storage, workspace and live speech availability separately.
 class ReadyResponse(Model):
     ready: bool
     storage: bool

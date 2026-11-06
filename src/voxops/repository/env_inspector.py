@@ -24,8 +24,8 @@ ASGI_COMMAND = rf"{RUNNER}(?:python3? -m )?(?:uvicorn|gunicorn) {ASGI_TARGET}"
 MIGRATION_COMMAND = re.compile(rf"{RUNNER}alembic upgrade head")
 
 
-# Why: Extract configuration requirements without retaining values or source excerpts.
-# How: Match assignment/reference identifiers and annotate presence and browser exposure.
+# Finds configuration names used by project files.
+# Records whether each name is present or exposed without keeping its value.
 def config_names(
     text: str, *, example: bool = False, env_file: bool = False
 ) -> list[ConfigRequirement]:
@@ -49,8 +49,8 @@ def config_names(
     return result
 
 
-# Why: Preserve recognizable commands without returning embedded credentials or literal arguments.
-# How: Keep only known tool invocations and safe module/script paths, redacting everything else.
+# Extracts a recognizable command from project metadata.
+# Keeps known tools and safe paths while hiding other arguments.
 def safe_command(command: str) -> str:
     if not isinstance(command, str) or len(command) > 1000:
         return "[redacted command]"

@@ -14,8 +14,8 @@ from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
 
-# Why: Verify actual LangGraph execution and local persistence without any API credential.
-# How: Run every deterministic stage and compare the stored JSON to the typed returned result.
+# Analyze a sample repository without a model API key.
+# Check that the result is saved and matches the returned analysis.
 def test_graph_no_key_and_persistence(tmp_path):
     root = copy_fixture(tmp_path, "nextjs_fullstack")
     settings = settings_for(tmp_path)
@@ -30,8 +30,8 @@ def test_graph_no_key_and_persistence(tmp_path):
     assert "path" not in saved["scan"]
 
 
-# Why: Exercise the real typed PydanticAI output path with no paid provider access.
-# How: Inject TestModel output and verify refinement preserves proven facts.
+# Analyze a Vite sample with a controlled model response.
+# Check that the result retains facts established by the scan.
 def test_mocked_structured_topology_and_precedence(tmp_path):
     root = copy_fixture(tmp_path, "vite_only")
     (root / "vite.config.ts").write_text("export default { build: { ssr: 'src/entry.ts' } }")
@@ -57,7 +57,8 @@ def test_mocked_structured_topology_and_precedence(tmp_path):
     assert result.detected_units[0].role == "server_rendered_web"
     assert result.detected_units[0].detection.evidence[-1].source == "llm"
     assert len(resolver.context(result.detected_units)) <= settings.max_context_chars
-    # A typed model answer still cannot replace proven server/API capability with static hosting.
+    # Give the model a response that suggests static hosting.
+    # Check that the detected server and API features are kept.
     next_root = copy_fixture(tmp_path, "nextjs_fullstack")
     next_unit = detect_units(scan_repository(next_root, settings))[0]
     model.custom_output_args = {
@@ -75,8 +76,8 @@ def test_mocked_structured_topology_and_precedence(tmp_path):
     assert any("contradicted" in warning for warning in result.warnings)
 
 
-# Why: Guarantee model and storage failures have different outcomes and safe explanations.
-# How: Trigger invalid model output, policy rejection and an unwritable storage destination.
+# Trigger invalid model output, a policy error, and a storage failure.
+# Check that the analysis reports each failure appropriately.
 def test_graph_failure_transitions(tmp_path):
     root = copy_fixture(tmp_path, "vite_only")
     settings = settings_for(tmp_path)

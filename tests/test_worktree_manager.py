@@ -10,8 +10,8 @@ from voxops.repository.worktree_manager import WorktreeManager
 from voxops.storage.scan_store import ScanStore
 
 
-# Why: Prove worktree isolation preserves every part of the original working tree.
-# How: Compare source branch, HEAD, status and file bytes before creation and after dirty cleanup.
+# Create and remove a worktree while the source has uncommitted changes.
+# Check that the original branch, files, and changes stay intact.
 def test_worktree_lifecycle_preserves_source(tmp_path):
     source = committed_repo(tmp_path)
     (source / "tracked.txt").write_text("uncommitted source\n")
@@ -30,7 +30,8 @@ def test_worktree_lifecycle_preserves_source(tmp_path):
     with pytest.raises(AppError, match="explicitly") as failure:
         manager.remove(record.id)
     assert failure.value.category == "dirty_worktree"
-    # A restarted manager must recognize existing ownership records.
+    # Create a new manager after the worktree has been recorded.
+    # Check that it recognizes and can clean up the worktree.
     manager = WorktreeManager(settings, ScanStore(settings.data_dir))
     assert manager.remove(record.id, discard_changes=True).status == "removed"
     assert not location.exists()
@@ -40,8 +41,8 @@ def test_worktree_lifecycle_preserves_source(tmp_path):
     assert (source / "untracked.txt").read_text() == "private local\n"
 
 
-# Why: Make Git prerequisite and ownership failures actionable without implicit initialization.
-# How: Exercise uninitialized, unborn, nested, detached and unknown-worktree paths.
+# Try creating or removing worktrees in several invalid Git states.
+# Check that each operation fails with a useful error.
 def test_worktree_prerequisites(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -70,8 +71,8 @@ def test_worktree_prerequisites(tmp_path):
     assert failure.value.category == "worktree_not_found"
 
 
-# Why: Prove local Git metadata cannot turn scan/checkout into project-defined code execution.
-# How: Install sentinel hooks/content filters and verify manager operations never invoke them.
+# Install Git hooks and filters that would create a marker if run.
+# Check that worktree operations never execute them.
 def test_git_hooks_and_filters_are_disabled(tmp_path):
     source = committed_repo(tmp_path)
     marker = tmp_path / "executed"
@@ -99,8 +100,8 @@ def test_git_hooks_and_filters_are_disabled(tmp_path):
     assert not marker.exists()
 
 
-# Why: Avoid deleting committed user work merely because a temporary worktree has clean status.
-# How: Commit inside a disposable worktree and require discard consent for cleanup.
+# Commit a new change inside a temporary worktree.
+# Check that cleanup requires permission to discard that commit.
 def test_worktree_new_commits_need_discard(tmp_path):
     source = committed_repo(tmp_path)
     settings = settings_for(tmp_path)
@@ -126,8 +127,8 @@ def test_worktree_new_commits_need_discard(tmp_path):
     assert not (source / "new.txt").exists()
 
 
-# Why: Keep interrupted cleanup recoverable and refuse generated branch collisions.
-# How: Retry a failed branch deletion from persisted state and simulate an occupied branch.
+# Interrupt worktree cleanup and create a conflicting branch name.
+# Check that cleanup can be retried and the collision is rejected.
 def test_worktree_cleanup_retry_and_collision(tmp_path, monkeypatch):
     import voxops.repository.worktree_manager as module
 
@@ -137,8 +138,8 @@ def test_worktree_cleanup_retry_and_collision(tmp_path, monkeypatch):
     record = manager.create(str(source))
     original = module.git
 
-    # Why: Exercise the failure window after a worktree directory has already been removed.
-    # How: Fail only generated branch deletion while forwarding all other Git operations.
+    # Simulate a failure when Git tries to delete a branch.
+    # Pass other Git commands through unchanged.
     def fail_branch_delete(path, *args, **kwargs):
         if args[0] == "branch":
             raise AppError("git_failed", "Simulated local deletion failure.", 409)

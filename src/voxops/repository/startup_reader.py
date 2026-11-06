@@ -15,15 +15,15 @@ TARGET = re.compile(rf"^{RUNNER}(?:python3? -m )?(?:uvicorn|gunicorn) (\S+)")
 STARTUP_FILES = {"Procfile", "README.md", "Dockerfile"}
 
 
-# Why: Match documented commands to actual applications instead of unrelated README examples.
-# How: Extract the already-sanitized server module and exported application name.
+# Finds the application named in a server startup command.
+# Extracts the module and application name from the checked command.
 def startup_target(command: str) -> str | None:
     match = TARGET.match(command)
     return match[1] if match else None
 
 
-# Why: Retain startup preparation without treating arbitrary shell commands as safe metadata.
-# How: Accept only known migration steps followed by a sanitized startup command.
+# Reads supported startup and preparation commands.
+# Accepts known migration steps followed by a recognized server command.
 def parse_startup(path: str, text: str, prerequisites: list[str]) -> StartupCommand | None:
     segments = [part.strip() for part in text.split("&&")]
     before = [safe_command(part) for part in segments[:-1]]
@@ -43,8 +43,8 @@ def parse_startup(path: str, text: str, prerequisites: list[str]) -> StartupComm
     )
 
 
-# Why: Read Docker's final runtime instruction without executing Docker or build commands.
-# How: Restrict parsing to the final stage and combine literal exec-form ENTRYPOINT/CMD arguments.
+# Finds the final startup command in a Dockerfile.
+# Reads literal entrypoint and command arguments from the last build stage.
 def docker_startup(text: str) -> str | None:
     stage = re.split(r"(?im)^\s*FROM\s+", text.replace("\\\n", " "))[-1]
     commands = re.findall(r"(?im)^\s*CMD\s+(.+)$", stage)
@@ -71,12 +71,12 @@ def docker_startup(text: str) -> str | None:
     ):
         return arguments[2]
     if any("$" in item for item in entrypoint + arguments):
-        return None  # Exec-form Docker arguments do not expand environment variables.
+        return None
     return shlex.join(entrypoint + arguments)
 
 
-# Why: Discover existing startup instructions while retaining only allowlisted command metadata.
-# How: Read Procfile web entries, fenced README shell blocks and final Docker CMD instructions.
+# Finds documented ways to start a project.
+# Checks Procfile entries, README command blocks and Docker instructions.
 def read_startup(path: str, text: str) -> list[StartupCommand]:
     name = PurePosixPath(path).name
     if name == "Dockerfile":
@@ -94,7 +94,7 @@ def read_startup(path: str, text: str) -> list[StartupCommand]:
         for line in block.splitlines():
             line = line.strip().removeprefix("$ ")
             if re.match(r"(?:cd|pushd|popd)\b", line):
-                break  # A changed working directory needs explicit build-context handling.
+                break
             clean = safe_command(line)
             if MIGRATION_COMMAND.fullmatch(clean):
                 prerequisites.append(clean)

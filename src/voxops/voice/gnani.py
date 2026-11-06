@@ -2,11 +2,11 @@ from voxops.core.errors import AppError
 from voxops.domain.models import VoiceTranscript
 
 
-# Why: Distinguish missing verified Gnani setup from transient transport or recognition failure.
-# How: Preserve an explicit public configuration category and actionable local explanation.
+# Represents a missing Gnani speech configuration.
+# Provides a public error explaining why live transcription is unavailable.
 class GnaniNotConfigured(AppError):
-    # Why: Keep unsupported live STT from being reported as successful transcription.
-    # How: Return a service-unavailable configuration error without contacting guessed endpoints.
+    # Creates the error for unavailable Gnani transcription.
+    # Reports a configuration problem without contacting a service.
     def __init__(self):
         super().__init__(
             "gnani_not_configured",
@@ -16,11 +16,11 @@ class GnaniNotConfigured(AppError):
         )
 
 
-# Why: Reserve a truthful Gnani transport boundary until its contract can be verified live.
-# How: Implement the provider protocol with an explicit not-configured result for all live calls.
+# Provides the Gnani speech interface while live setup is unavailable.
+# Reports the missing configuration instead of claiming to transcribe audio.
 class GnaniSpeechToText:
-    # Why: Avoid inventing endpoints, payload fields or WebSocket messages.
-    # How: Refuse live requests before reading or transmitting any audio.
+    # Handles a request for live Gnani transcription.
+    # Reports the missing configuration without sending the audio.
     async def transcribe(
         self, *, audio: bytes | None = None, text: str | None = None, language: str | None = None
     ) -> VoiceTranscript:

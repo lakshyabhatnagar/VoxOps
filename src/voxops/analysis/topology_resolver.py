@@ -9,16 +9,16 @@ from voxops.core.settings import Settings
 from voxops.domain.models import AIUsage, DeployableUnit, Evidence, Role
 
 
-# Why: Allow bounded optional AI assistance while guaranteeing deterministic fallback.
-# How: Inject a typed PydanticAI agent and merge only suggestions consistent with known facts.
+# Suggests how the discovered parts of a project fit together.
+# Checks suggestions against known facts and falls back to the original results.
 class TopologyResolver:
-    # Why: Support no-key execution and deterministic mocked agents in tests.
-    # How: Lazily create the configured model unless an explicit specialist agent is injected.
+    # Sets up the optional assistant used to improve project analysis.
+    # Keeps the settings and any assistant supplied by the caller.
     def __init__(self, settings: Settings, agent: Agent[None, TopologyOutput] | None = None):
         self.settings, self.agent = settings, agent
 
-    # Why: Decide optional graph routing without constructing a network client unnecessarily.
-    # How: Check explicit injection or a supported provider's configured credential.
+    # Reports whether the optional assistant can be used.
+    # Checks for a supplied assistant or an API key for the configured AI service.
     def available(self) -> bool:
         return self.agent is not None or bool(
             self.settings.model.startswith("anthropic:")
@@ -27,8 +27,8 @@ class TopologyResolver:
             and self.settings.openai_api_key
         )
 
-    # Why: Never send whole files, commands, absolute paths or environment values to a model.
-    # How: Build capped JSON from safe relative facts and enums, omitting excess units entirely.
+    # Prepares project facts for the optional assistant.
+    # Includes limited relative paths and facts while leaving out file contents and values.
     def context(self, units: list[DeployableUnit]) -> str:
         payload: list[dict] = []
         for unit in units:
@@ -48,8 +48,8 @@ class TopologyResolver:
             payload.append(item)
         return json.dumps({"units": payload}, ensure_ascii=True)
 
-    # Why: Degrade safely on authentication, timeout, invalid output or provider failure.
-    # How: Bound time/tokens/calls and accept only validated, conservative role refinements.
+    # Applies useful suggestions to the discovered project parts.
+    # Checks each suggestion and keeps the original results if the assistant fails.
     async def resolve(
         self, units: list[DeployableUnit]
     ) -> tuple[list[DeployableUnit], AIUsage, list[str]]:
@@ -86,7 +86,6 @@ class TopologyResolver:
                 if unit is None:
                     warnings.append("Model referenced an unknown unit; suggestion ignored.")
                     continue
-                # Explicit adapter roles always win; only genuinely unknown roles can be refined.
                 if unit.role == Role.UNKNOWN and assessment.conclusion == "supported":
                     if assessment.role not in {Role.SSR, Role.FULLSTACK}:
                         continue
@@ -106,7 +105,6 @@ class TopologyResolver:
                     )
             return resolved, usage, sorted(set(warnings))
         except Exception:
-            # Provider exception strings may contain credentials or prompts; never persist them.
             return (
                 units,
                 usage,

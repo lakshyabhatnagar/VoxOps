@@ -13,11 +13,11 @@ from voxops.frameworks.base import facts, owns
 from voxops.frameworks.registry import make_unit, package_manager
 
 
-# Why: Identify standalone React/Vite applications while excluding shared UI packages.
-# How: Require both dependencies and use application files/scripts for executable evidence.
+# Recognizes standalone React applications built with Vite.
+# Checks dependencies and application files to distinguish them from shared packages.
 class ReactViteAdapter:
-    # Why: Preserve actual Vite build conventions and flag server-capable ambiguity.
-    # How: Read sanitized script/config facts and inherit workspace package-manager evidence.
+    # Finds a React and Vite application and its build details.
+    # Uses project scripts and configuration to identify its commands and output.
     def detect(self, manifest: ManifestSummary, scan: RepoScan) -> DeployableUnit | None:
         if manifest.kind != "node" or not {"react", "vite"}.issubset(manifest.dependencies):
             return None

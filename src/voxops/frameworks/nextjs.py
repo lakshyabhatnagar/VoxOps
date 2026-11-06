@@ -13,11 +13,11 @@ from voxops.frameworks.base import facts, owns
 from voxops.frameworks.registry import make_unit, package_manager
 
 
-# Why: Treat Next.js as a single deployable application with evidence-based server capability.
-# How: Combine Next dependencies, explicit export config and route/server syntax facts.
+# Recognizes Next.js applications in a project.
+# Uses dependencies, export settings and server routes to describe the application.
 class NextJSAdapter:
-    # Why: Avoid incorrect static classification or invented frontend/backend splitting.
-    # How: Let API/server evidence override export assumptions and report conflicting configuration.
+    # Determines how a Next.js application can run.
+    # Checks server features and reports conflicts with static export settings.
     def detect(self, manifest: ManifestSummary, scan: RepoScan) -> DeployableUnit | None:
         if manifest.kind != "node" or "next" not in manifest.dependencies:
             return None
