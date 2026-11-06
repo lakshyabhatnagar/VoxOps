@@ -151,36 +151,92 @@ def test_existing_invalid_artifact_gets_minimal_proposal(tmp_path):
     assert (root / "Dockerfile").read_text() == original
 
 
-# Generate a requested one-line change to a source file.
-# Check that the suggested edit stays private and leaves the source untouched.
-def test_explicit_source_patch_is_private_and_minimal(tmp_path):
+@pytest.mark.parametrize("artifact_type", ["dockerfile", "ci"])
+@pytest.mark.parametrize("original", ["", "This file is broken.\n"])
+# Start with an empty or broken Dockerfile or CI file and ask the AI to replace it.
+# Return a complete valid file that is larger than the old six-line repair allowance.
+# Check that the replacement is accepted and saved for review after one request.
+# Confirm that the original project file is still untouched.
+def test_existing_broken_artifact_can_be_fully_replaced(tmp_path, artifact_type, original):
+    from voxops.artifacts.planner import build_plan
+    from voxops.storage.artifact_store import digest
+
+    root, analysis, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
+    target = "Dockerfile" if artifact_type == "dockerfile" else ".github/workflows/ci.yml"
+    replacement = (
+        DOCKER.replace(
+            "USER 1000\n",
+            "ENV PYTHONUNBUFFERED=1\nENV PYTHONDONTWRITEBYTECODE=1\n"
+            'LABEL description="Example app"\nEXPOSE 8000\nUSER 1000\n',
+        )
+        if artifact_type == "dockerfile"
+        else CI
+    )
+    (root / target).parent.mkdir(parents=True, exist_ok=True)
+    (root / target).write_text(original)
+    plan = build_plan(root, analysis, plan.strategy_by_unit)
+    settings = settings_for(tmp_path)
+    store = ArtifactStore(settings.data_dir)
+    agent = Agent(
+        TestModel(custom_output_args={"target_path": target, "content": replacement}),
+        output_type=ArtifactOutput,
+        retries=0,
+    )
+    generator = ArtifactGenerator(settings, store, agent)
+    task = next(task for task in plan.tasks.values() if task.artifact_type == artifact_type)
+    result = asyncio.run(generator.generate(uuid4().hex, root, task, plan, ModelBudget(settings)))
+
+    assert result.status == "passed", result.model_dump(mode="json")
+    assert len(result.attempts) == 1
+    assert result.proposal.original_hash == digest(original.encode())
+    assert store.read_blob(result.proposal.staged_ref).decode() == replacement
+    assert (root / target).read_text() == original
+
+
+@pytest.mark.parametrize("port_count", [0, 1, 12, 60])
+# Ask the AI to correct every service port, or populate an empty settings file when requested.
+# Some cases need more changed lines than the old relative and forty-line allowances.
+# Check that the complete requested repair is saved for review after one attempt.
+# Confirm the original file stays unchanged and the repair still needs source-change approval.
+def test_requested_source_repair_can_change_every_required_line(tmp_path, port_count):
     from voxops.artifacts.planner import build_plan
     from voxops.domain.artifact_models import SourcePatchSpec
     from voxops.storage.artifact_store import digest
 
     root, analysis, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
-    (root / "settings.py").write_text("PORT = 8000\n")
+    original = "".join(f"SERVICE_{index}_PORT = 8000\n" for index in range(port_count))
+    replacement = "".join(f"SERVICE_{index}_PORT = 8080\n" for index in range(port_count or 12))
+    (root / "settings.py").write_text(original)
     patch = SourcePatchSpec(
         target_path="settings.py",
-        expected_hash=digest(b"PORT = 8000\n"),
-        reason="Correct the documented runtime port",
-        correction="Use port 8080.",
+        expected_hash=digest(original.encode()),
+        reason="Correct the documented service ports",
+        correction=(
+            "Change every service port from 8000 to 8080."
+            if port_count
+            else (
+                "Create twelve service port settings named SERVICE_0_PORT through SERVICE_11_PORT, "
+                "each set to 8080."
+            )
+        ),
     )
     plan = build_plan(root, analysis, plan.strategy_by_unit, patches=[patch])
     settings = settings_for(tmp_path)
     store = ArtifactStore(settings.data_dir)
     agent = Agent(
-        TestModel(custom_output_args={"target_path": "settings.py", "content": "PORT = 8080\n"}),
+        TestModel(custom_output_args={"target_path": "settings.py", "content": replacement}),
         output_type=ArtifactOutput,
         retries=0,
     )
     generator = ArtifactGenerator(settings, store, agent)
     task = plan.tasks["patch-0"]
     result = asyncio.run(generator.generate(uuid4().hex, root, task, plan, ModelBudget(settings)))
+    assert (root / "settings.py").read_text() == original
     assert result.status == "passed" and result.proposal.artifact_type == "source_patch"
+    assert len(result.attempts) == 1
     assert task.approval_class == "source_patch"
-    assert store.read_blob(result.proposal.staged_ref) == b"PORT = 8080\n"
-    assert (root / "settings.py").read_bytes() == b"PORT = 8000\n"
+    assert result.proposal.original_hash == digest(original.encode())
+    assert store.read_blob(result.proposal.staged_ref).decode() == replacement
 
 
 # Generate several files with a limit of one model request for the run.

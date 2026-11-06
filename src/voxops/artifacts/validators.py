@@ -300,7 +300,8 @@ def _ignore(task: ArtifactTask, content: str) -> list[str]:
 
 
 # Compares a proposed source edit with the existing file.
-# Reports large edits, unsafe additions, and invalid Python or JSON syntax.
+# Checks added lines for unsafe URLs and browser-public secrets, and checks CORS changes.
+# Rejects protected configuration edits and invalid Python or JSON syntax.
 def _patch(task: ArtifactTask, content: str, root: Path | None) -> list[str]:
     if root is None:
         return ["Source patch validation requires the original repository."]
@@ -308,8 +309,7 @@ def _patch(task: ArtifactTask, content: str, root: Path | None) -> list[str]:
     if before is None:
         return ["Source patch requires a readable existing file."]
     old = before.decode("utf-8", errors="replace")
-    diff = list(difflib.ndiff(old.splitlines(), content.splitlines()))
-    changed = [line[2:] for line in diff if line.startswith(("+ ", "- "))]
+    diff = difflib.ndiff(old.splitlines(), content.splitlines())
     added = "\n".join(line[2:] for line in diff if line.startswith("+ "))
     errors = []
     wildcard = re.compile(r"(?:allow_origins|cors|origin)\s*[:=][\s\S]{0,200}?[\"']\*[\"']", re.I)
@@ -332,8 +332,6 @@ def _patch(task: ArtifactTask, content: str, root: Path | None) -> list[str]:
             json.loads(content)
         except json.JSONDecodeError:
             errors.append("JSON source patch has invalid syntax.")
-    if len(changed) > 40 or len(content) > 131072:
-        errors.append("Source patch exceeds the minimal change limit.")
     if (
         re.search(r'https?://|(?:allow_origins|cors)[^\n]*["\']\*', added, re.I)
         or PurePosixPath(task.target_path).name
