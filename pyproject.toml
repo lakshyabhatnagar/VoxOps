@@ -11,6 +11,7 @@ dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.11,<3",
   "pydantic-settings>=2.8,<3", "langgraph>=1,<2",
   "pydantic-ai-slim[anthropic,openai]>=1,<2", "httpx>=0.28,<1",
+  "pyyaml>=6,<7",
 ]
 
 [project.scripts]
@@ -28,4 +29,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]

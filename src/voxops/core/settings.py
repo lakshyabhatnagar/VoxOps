@@ -4,8 +4,8 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Why: Centralize bounded local execution and optional model configuration.
-# How: Validate environment settings without requiring any cloud credential.
+# Holds the application's local paths and service settings.
+# Reads and checks environment values without requiring cloud credentials.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VOXOPS_", extra="ignore")
     allowed_roots: list[Path] = Field(default_factory=lambda: [Path.cwd()])
@@ -16,12 +16,24 @@ class Settings(BaseSettings):
     max_context_chars: int = Field(default=16000, ge=1000, le=32000)
     model_timeout: float = Field(default=20, ge=1, le=60)
     model: str = "anthropic:claude-sonnet-4-5"
+    artifact_concurrency: int = Field(default=3, ge=1, le=8)
+    artifact_max_requests: int = Field(default=60, ge=1, le=300)
+    artifact_max_tokens: int = Field(default=150000, ge=1000, le=1000000)
+    artifact_task_tokens: int = Field(default=20000, ge=1000, le=100000)
+    artifact_staged_bytes: int = Field(default=8388608, ge=131072, le=67108864)
+    artifact_optional_tools: bool = False
+    github_mcp_url: str | None = None
+    github_mcp_token: SecretStr | None = None
+    git_credential_helper: str | None = None
+    git_timeout: float = Field(default=30, ge=1, le=120)
+    git_author_name: str = "VoxOps"
+    git_author_email: str = "voxops@localhost"
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
 
     @field_validator("allowed_roots")
-    # Why: Prevent an empty policy from accidentally authorizing every filesystem path.
-    # How: Require at least one existing canonical workspace directory.
+    # Checks the directories allowed for workspace access.
+    # Requires at least one existing directory and resolves its path.
     def valid_roots(cls, roots: list[Path]) -> list[Path]:
         if not roots or any(not root.is_dir() for root in roots):
             raise ValueError("allowed_roots must contain existing directories")
