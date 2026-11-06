@@ -7,8 +7,8 @@ from urllib.parse import urlsplit
 import httpx
 
 
-# Why: Demonstrate analysis and explicit temporary worktree setup without cloud access.
-# How: Submit typed JSON to loopback endpoints and clean up only the newly created worktree.
+# Runs the example against your local VoxOps server and prints what it finds.
+# Can also create a separate Git working folder, inspect it, and remove that folder.
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", help="Absolute path within the server's configured workspace roots")
@@ -45,8 +45,8 @@ def main() -> None:
                 print(json.dumps({"cleanup": removed.json()}, indent=2))
 
 
-# Why: Keep CLI failures actionable without dumping request paths or transport internals.
-# How: Print the API's already-sanitized error envelope and terminate on failure status.
+# Stops the example if the server reports that a request failed.
+# Prints the server response so you can see what went wrong.
 def check_response(response: httpx.Response) -> None:
     if response.is_error:
         print(json.dumps(response.json(), indent=2))

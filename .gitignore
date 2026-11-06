@@ -3,5 +3,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .env
+.env.*
+!.env.example
+.audit/
+/.agents/
+/.aws/
+/.codex/
+/GOAL*.md
 .voxops/
 *.egg-info/

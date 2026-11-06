@@ -4,14 +4,14 @@ from pathlib import Path
 from voxops.core.errors import AppError
 
 
-# Why: Identify repositories without disclosing personal filesystem paths.
-# How: Hash the canonical local path into a stable opaque fingerprint.
+# Creates an identifier for a local project directory.
+# Calculates a checksum of its resolved path without exposing the path.
 def fingerprint(path: Path) -> str:
     return hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:24]
 
 
-# Why: Constrain filesystem operations to explicitly trusted local workspaces.
-# How: Reject traversal components and require canonical containment in an allowed directory.
+# Checks that a requested project is in an allowed directory.
+# Rejects paths containing ".." and checks where the directory actually lives.
 def workspace_path(value: str, roots: list[Path]) -> Path:
     path = Path(value).expanduser()
     if ".." in path.parts:

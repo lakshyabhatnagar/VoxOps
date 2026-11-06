@@ -5,22 +5,22 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# Why: Prevent unchecked fields from silently entering versioned contracts.
-# How: Share strict extra-field rejection and assignment validation across domain objects.
+# Provides common rules for the app's data objects.
+# Rejects unknown fields and checks values when fields are changed.
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-# Why: Bound framework identifiers used by adapters and downstream consumers.
-# How: Serialize a small stable string enumeration.
+# Lists the app frameworks that the scanner recognizes.
+# Uses the stored names for FastAPI, React with Vite, and Next.js.
 class Framework(StrEnum):
     FASTAPI = "fastapi"
     VITE = "react_vite"
     NEXT = "nextjs"
 
 
-# Why: Distinguish independently deployable behaviors without forcing frontend/backend pairs.
-# How: Enumerate supported runtime roles, including uncertain and future worker roles.
+# Lists the ways a detected app can serve or process work.
+# Includes web, static, worker, and unknown roles.
 class Role(StrEnum):
     HTTP = "http_service"
     STATIC = "static_frontend"
@@ -30,8 +30,8 @@ class Role(StrEnum):
     UNKNOWN = "unknown"
 
 
-# Why: Separate proof from inference while keeping source values out of results.
-# How: Record relative paths, fixed sanitized field descriptions and bounded confidence.
+# Records a fact used to identify an app or its requirements.
+# Includes the source file, description, confidence, and whether AI supplied it.
 class Evidence(Model):
     path: str
     kind: str
@@ -40,8 +40,8 @@ class Evidence(Model):
     source: Literal["deterministic", "llm"] = "deterministic"
 
 
-# Why: Describe needed configuration without ever storing configuration values.
-# How: Keep names, lifecycle, exposure and presence as typed metadata only.
+# Describes a configuration setting an app may need.
+# Records its name, timing, visibility, and presence without storing its value.
 class ConfigRequirement(Model):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     necessity: Literal["required", "optional", "unknown"] = "unknown"
@@ -50,8 +50,8 @@ class ConfigRequirement(Model):
     presence: Literal["present", "example_only", "referenced", "unknown"] = "unknown"
 
 
-# Why: Represent candidate URL wiring without inventing deployed dependencies.
-# How: Require producer, consumer and evidence while retaining unverified status.
+# Describes a possible connection between two detected app units.
+# Records the configuration key, supporting evidence, confidence, and verification status.
 class UnitDependencyCandidate(Model):
     producer_unit: str
     consumer_unit: str
@@ -63,8 +63,8 @@ class UnitDependencyCandidate(Model):
     verification_status: Literal["candidate", "verified"] = "candidate"
 
 
-# Why: Preserve package and startup requirements independently of any cloud adapter.
-# How: Describe language version, manager, dependency files and existing commands.
+# Describes what an app needs to build and start.
+# Records its language, package files, commands, workspace, and output folder.
 class RuntimeSpec(Model):
     language: Literal["python", "javascript"]
     version: str | None = None
@@ -79,8 +79,8 @@ class RuntimeSpec(Model):
     lockfile_path: str | None = None
 
 
-# Why: Capture an adapter's deterministic classification and remaining uncertainty.
-# How: Pair framework and root with evidence, role and explicit open questions.
+# Records how the scanner identified an app framework and role.
+# Includes the app folder, supporting evidence, confidence, and unanswered questions.
 class FrameworkDetection(Model):
     framework: Framework
     root_path: str
@@ -90,8 +90,8 @@ class FrameworkDetection(Model):
     unresolved_questions: list[str] = Field(default_factory=list)
 
 
-# Why: Provide a stable deployable-unit contract for future artifact workers.
-# How: Bind deterministic IDs, runtime metadata and value-free configuration to each unit.
+# Describes one detected part of an app that can be deployed.
+# Combines its identity, framework, runtime, configuration needs, and detection evidence.
 class DeployableUnit(Model):
     id: str
     name: str
@@ -106,8 +106,8 @@ class DeployableUnit(Model):
     detection: FrameworkDetection
 
 
-# Why: Report Git prerequisites without exposing remotes or local modifications' contents.
-# How: Return inspection metadata and a precise initialized/HEAD status.
+# Records the state of Git in the scanned project.
+# Includes the branch, commit, local changes, remotes, and repository status.
 class GitMetadata(Model):
     status: Literal["uninitialized", "missing_initial_commit", "committed", "git_unavailable"]
     branch: str | None = None
@@ -118,8 +118,8 @@ class GitMetadata(Model):
     nested_path: bool = False
 
 
-# Why: Summarize manifests safely for detection and optional model context.
-# How: Retain normalized dependency names and redacted commands, never arbitrary JSON fields.
+# Summarizes a package file found in the project.
+# Keeps dependency names, scripts, workspace details, and build information.
 class ManifestSummary(Model):
     path: str
     root_path: str
@@ -136,16 +136,16 @@ class ManifestSummary(Model):
     server_build: bool = False
 
 
-# Why: Associate a discovered startup command with its source and required preparation.
-# How: Keep sanitized command text and ordered prerequisites together without executing them.
+# Records a discovered command for starting an app.
+# Includes the source path and commands that need to run first.
 class StartupCommand(Model):
     path: str
     command: str
     prerequisite_commands: list[str] = Field(default_factory=list)
 
 
-# Why: Keep the bounded scanner result reproducible and usable independently of detection.
-# How: Collect relative file metadata and safe facts with input revision fingerprints.
+# Holds the files and facts collected while scanning a project.
+# Includes Git details, package summaries, configuration names, warnings, and checksums.
 class RepoScan(Model):
     id: str
     scanned_at: datetime
@@ -164,8 +164,8 @@ class RepoScan(Model):
     startup_commands: list[StartupCommand] = Field(default_factory=list)
 
 
-# Why: Account for optional model use without saving prompts or credentials.
-# How: Record outcome, model identity and available token/request totals.
+# Records whether an AI model was used during analysis.
+# Keeps the model name and counts of requests and tokens without saving prompts.
 class AIUsage(Model):
     status: Literal["skipped", "unavailable", "failed", "used"] = "skipped"
     model: str | None = None
@@ -174,8 +174,8 @@ class AIUsage(Model):
     output_tokens: int = 0
 
 
-# Why: Expose one stable aggregate result for APIs, CLI and persistence.
-# How: Combine scanner facts, validated units and unresolved findings with usage metadata.
+# Combines the project scan with the detected app units and possible connections.
+# Includes warnings, unanswered questions, and information about AI use.
 class AnalysisResult(Model):
     schema_version: Literal["1"] = "1"
     scan: RepoScan
@@ -187,8 +187,8 @@ class AnalysisResult(Model):
     deterministic_only: bool = True
 
 
-# Why: Track only application-owned worktrees and their committed source revision.
-# How: Persist lifecycle and immutable branch/location ownership metadata.
+# Tracks a project working copy created by the app.
+# Records its source commit, branch, location, status, and warnings.
 class WorktreeRecord(Model):
     id: str
     source_repo_fingerprint: str
@@ -201,8 +201,8 @@ class WorktreeRecord(Model):
     warnings: list[str] = Field(default_factory=list)
 
 
-# Why: Keep voice transport separate from orchestration and audio retention.
-# How: Pass ordinary text and optional provider metadata in a typed object.
+# Holds text received from a voice provider.
+# Includes the language, confidence, request ID, and any error category.
 class VoiceTranscript(Model):
     text: str
     language: str | None = None

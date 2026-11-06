@@ -9,16 +9,16 @@ from voxops.domain.models import (
 )
 
 
-# Why: Keep independent framework adapters separate from future cloud service adapters.
-# How: Require each adapter to return a typed unit or decline the package.
+# Defines how a framework is recognized in a project.
+# Each adapter can return a matching project unit or decline the package.
 class FrameworkAdapter(Protocol):
-    # Why: Give the registry one bounded detection contract per package root.
-    # How: Consume sanitized scan facts and never perform filesystem or execution side effects.
+    # Checks a package for the adapter's framework.
+    # Uses the supplied scan facts without running project code.
     def detect(self, manifest: ManifestSummary, scan: RepoScan) -> DeployableUnit | None: ...
 
 
-# Why: Assign files to their nearest package and avoid duplicate parent detections.
-# How: Select the deepest manifest directory containing the relative file.
+# Finds whether a file belongs to a particular package.
+# Uses the closest enclosing manifest directory to avoid assigning it twice.
 def owns(root: str, file: str, scan: RepoScan) -> bool:
     path = PurePosixPath(file)
     roots = {item.root_path for item in scan.manifests}
@@ -27,7 +27,7 @@ def owns(root: str, file: str, scan: RepoScan) -> bool:
     return nearest == root
 
 
-# Why: Keep adapters focused on evidence within their own build context.
-# How: Filter safe facts through nearest-package ownership.
+# Collects scan facts belonging to one package.
+# Keeps only facts whose files belong to that package.
 def facts(manifest: ManifestSummary, scan: RepoScan) -> list[Evidence]:
     return [item for item in scan.evidence if owns(manifest.root_path, item.path, scan)]

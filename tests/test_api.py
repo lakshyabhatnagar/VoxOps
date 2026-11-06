@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from voxops.main import create_app
 
 
-# Why: Verify the actual API contract from liveness through analysis, voice and worktree cleanup.
-# How: Send loopback requests through the ASGI app using real disposable Git fixtures.
+# Call the local API to analyze a repository and manage a worktree.
+# Check the responses through the full workflow, including cleanup.
 def test_api_end_to_end(tmp_path):
     app = create_app(settings_for(tmp_path))
     client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
@@ -34,8 +34,8 @@ def test_api_end_to_end(tmp_path):
     assert bad.status_code == 422 and "sentinel" not in bad.text
 
 
-# Why: Protect the trusted local executor from network exposure and browser-origin attacks.
-# How: Reject remote socket peers, forged Host headers and cross-origin requests before routing.
+# Send requests from remote addresses and untrusted browser origins.
+# Check that the local API rejects them.
 def test_api_local_only(tmp_path):
     app = create_app(settings_for(tmp_path))
     remote = TestClient(app, base_url="http://127.0.0.1", client=("192.0.2.4", 50000))

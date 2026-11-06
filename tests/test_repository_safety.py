@@ -8,8 +8,8 @@ from voxops.repository.filesystem_scanner import scan_repository
 from voxops.repository.path_policy import workspace_path
 
 
-# Why: Protect workspace containment against direct traversal and symbolic-link escapes.
-# How: Attempt forbidden paths and verify the scanner skips links even inside allowed roots.
+# Try paths outside the allowed folder and add symbolic links to a sample.
+# Check that access is refused or the links are skipped.
 def test_path_and_symlink_policy(tmp_path):
     allowed = tmp_path / "allowed"
     outside = tmp_path / "outside"
@@ -23,8 +23,8 @@ def test_path_and_symlink_policy(tmp_path):
     assert not scan_repository(allowed, settings_for(tmp_path)).manifests
 
 
-# Why: Ensure secret values and project side effects cannot escape a repository scan.
-# How: Seed secrets, malformed files and executable source, then inspect serialized facts.
+# Add secrets, malformed files, and executable code to a sample repository.
+# Check that scanning hides the secrets and never runs the code.
 def test_scan_secrets_bounds_and_no_execution(tmp_path):
     root = copy_fixture(tmp_path, "fastapi_only")
     secret = "unique-sensitive-value-8675309"
@@ -45,8 +45,8 @@ def test_scan_secrets_bounds_and_no_execution(tmp_path):
     assert any("limit" in warning for warning in bounded.warnings)
 
 
-# Why: Ensure unsupported or empty repositories produce diagnostics rather than failures.
-# How: Scan an empty local directory and verify the typed scanner result remains valid.
+# Scan an empty temporary directory.
+# Check that the result contains no manifests and reports the empty repository.
 def test_empty_repository(tmp_path):
     scan = scan_repository(tmp_path, settings_for(tmp_path))
     assert scan.manifests == []

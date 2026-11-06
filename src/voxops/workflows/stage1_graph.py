@@ -18,8 +18,8 @@ from voxops.repository.path_policy import workspace_path
 from voxops.storage.scan_store import ScanStore
 
 
-# Why: Keep graph destinations under application control rather than model-generated strings.
-# How: Centralize node names and conditional transition labels in one enum.
+# Lists the named steps used to scan and analyze a project.
+# Also includes the error route used when a step cannot continue.
 class Step(StrEnum):
     PREPARE = "prepare_scan"
     SCAN = "deterministic_scan"
@@ -30,8 +30,8 @@ class Step(StrEnum):
     ERROR = "error"
 
 
-# Why: Make each stage's local-only input, findings and failures explicit.
-# How: Use a typed state with structured optional result/error and stable status values.
+# Holds the information passed between project analysis steps.
+# Includes the input path, scan, detected apps, warnings, errors, and final result.
 class StageState(TypedDict, total=False):
     scan_id: str
     input_path: str
@@ -48,11 +48,11 @@ class StageState(TypedDict, total=False):
     status: Literal["scanning", "validated", "complete", "failed"]
 
 
-# Why: Execute precisely the Stage 1 pipeline with safe skips and typed failure propagation.
-# How: Bind scanner, adapters, specialist and store into a small compiled LangGraph.
+# Runs the steps that scan a project and identify its app units.
+# Optionally asks an AI to resolve uncertainty and saves the completed result.
 class Stage1Workflow:
-    # Why: Share dependencies without adding an unrestricted supervisor or project execution tools.
-    # How: Register a fixed graph whose conditional routes can only proceed or terminate.
+    # Connects the scanner, app detection, optional AI, and result storage.
+    # Sets the order of steps and stops the workflow when a step reports an error.
     def __init__(
         self, settings: Settings, store: ScanStore, resolver: TopologyResolver | None = None
     ):
@@ -87,8 +87,8 @@ class Stage1Workflow:
         builder.add_edge(Step.PERSIST.value, END)
         self.graph = builder.compile()
 
-    # Why: Preserve an original safe error category across graph transitions.
-    # How: Store only public error fields and a terminal status in state.
+    # Turns an application error into a failed workflow state.
+    # Keeps its public message, category, and status for the caller.
     def failure(self, error: AppError) -> dict:
         return {
             "error": ErrorDetail(category=error.category, message=error.message),
@@ -96,13 +96,13 @@ class Stage1Workflow:
             "status": "failed",
         }
 
-    # Why: Stop failed stages instead of running downstream nodes on absent findings.
-    # How: Route exclusively on the presence of a structured error.
+    # Checks whether the current analysis state contains an error.
+    # Returns whether the workflow may continue to its next step.
     def continue_or_error(self, state: StageState) -> bool:
         return "error" not in state
 
-    # Why: Canonicalize untrusted input before any scanner or Git operation.
-    # How: Apply configured workspace containment and preserve policy failures as graph data.
+    # Checks that the requested project path is inside an allowed folder.
+    # Returns the prepared path and initial state, or records the path error.
     def prepare_scan(self, state: StageState) -> dict:
         try:
             return {
@@ -113,8 +113,8 @@ class Stage1Workflow:
         except AppError as error:
             return self.failure(error)
 
-    # Why: Keep blocking local reads off the API event loop.
-    # How: Run the bounded deterministic scanner in a worker thread and retain safe errors.
+    # Scans the project on a worker thread so file reads do not block other requests.
+    # Returns the scan and warnings, or records an error if the project cannot be read.
     async def deterministic_scan(self, state: StageState) -> dict:
         try:
             scan = await asyncio.to_thread(
@@ -126,8 +126,8 @@ class Stage1Workflow:
         except OSError:
             return self.failure(AppError("scan_unavailable", "Repository could not be read.", 422))
 
-    # Why: Discover zero, one or many units without forcing an application topology.
-    # How: Apply the framework registry to sanitized manifests and source facts.
+    # Finds supported app units from the project scan.
+    # Adds warnings when none are found or an AI model is unavailable.
     def detect_units(self, state: StageState) -> dict:
         units = detect_units(state["scan"])
         warnings = list(state["warnings"])
@@ -148,8 +148,8 @@ class Stage1Workflow:
             ),
         }
 
-    # Why: Call the specialist only for ambiguity or an explicit supplementary-analysis request.
-    # How: Combine local availability and typed deterministic uncertainty into a fixed route enum.
+    # Chooses whether to ask the AI about uncertain app findings.
+    # Continues directly to validation when no model is available or needed.
     def route_resolution(self, state: StageState) -> Step:
         if "error" in state:
             return Step.ERROR
@@ -160,14 +160,14 @@ class Stage1Workflow:
             else Step.VALIDATE
         )
 
-    # Why: Supplement deterministic facts without letting model errors fail a valid scan.
-    # How: Use the bounded resolver and retain its usage and fallback warnings.
+    # Asks the configured resolver to assess the detected app units.
+    # Returns its updated units, usage information, and any additional warnings.
     async def resolve_ambiguity(self, state: StageState) -> dict:
         units, usage, warnings = await self.resolver.resolve(state["candidate_units"])
         return {"final_units": units, "ai_usage": usage, "warnings": state["warnings"] + warnings}
 
-    # Why: Guarantee serialization-valid stable findings before persistence or API return.
-    # How: Build the aggregate model, retaining explicit unresolved adapter questions.
+    # Combines the scan and detected app units into an analysis result.
+    # Includes unresolved questions, warnings, and whether an AI was used.
     def validate_findings(self, state: StageState) -> dict:
         units = state["final_units"]
         result = AnalysisResult(
@@ -184,8 +184,8 @@ class Stage1Workflow:
         )
         return {"result": result, "status": "validated"}
 
-    # Why: Finish only after a complete local result is stored successfully.
-    # How: Atomically persist the validated result and log only its generated identifier.
+    # Saves the completed analysis result on a worker thread.
+    # Marks the workflow complete or records a storage error.
     async def persist_result(self, state: StageState) -> dict:
         try:
             await asyncio.to_thread(self.store.save, state["result"])
@@ -194,8 +194,8 @@ class Stage1Workflow:
         except AppError as error:
             return self.failure(error)
 
-    # Why: Expose a typed application boundary while preserving graph errors for HTTP handling.
-    # How: Generate a run ID, invoke the compiled graph and unwrap its validated aggregate.
+    # Runs project analysis for the given path and optional AI request.
+    # Returns the result or raises the error reported by a workflow step.
     async def analyze(self, path: str, use_llm: bool = False) -> AnalysisResult:
         with tracing_context(enabled=False):
             state = await self.graph.ainvoke(

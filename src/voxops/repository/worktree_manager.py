@@ -15,11 +15,11 @@ from voxops.repository.path_policy import fingerprint, workspace_path
 from voxops.storage.scan_store import ScanStore
 
 
-# Why: Isolate per-run committed content without changing or deleting the original working tree.
-# How: Manage recorded Git worktrees outside source repositories with explicit cleanup policy.
+# Manages separate working copies of project commits.
+# Keeps ownership records and leaves the original project directory untouched.
 class WorktreeManager:
-    # Why: Retain ownership records across application restarts.
-    # How: Use an application-specific temporary root and a private local registry.
+    # Sets up storage for managed working copies.
+    # Uses a local temporary directory and a private ownership registry.
     def __init__(self, settings: Settings, store: ScanStore):
         self.settings, self.store = settings, store
         self.root = (
@@ -27,15 +27,15 @@ class WorktreeManager:
         )
         self.lock = RLock()
 
-    # Why: Prevent arbitrary identifiers from escaping the registry directory.
-    # How: Require the exact generated hexadecimal worktree identifier format.
+    # Finds the registry file for a working copy.
+    # Accepts only identifiers in the expected generated format.
     def record_path(self, identifier: str) -> Path:
         if not re.fullmatch(r"[a-f0-9]{32}", identifier):
             raise AppError("worktree_not_found", "Unknown worktree identifier.", 404)
         return self.store.directory / f"worktree-{identifier}.json"
 
-    # Why: Never treat an unknown filesystem path as an application-owned worktree.
-    # How: Load a private typed record and verify its canonical managed destination.
+    # Loads the ownership record for a working copy.
+    # Checks that its destination is inside the managed directory.
     def load(self, identifier: str) -> tuple[WorktreeRecord, Path]:
         try:
             raw = json.loads(self.record_path(identifier).read_text())
@@ -58,16 +58,16 @@ class WorktreeManager:
             raise AppError("ownership_invalid", "Worktree ownership could not be verified.", 409)
         return record, source
 
-    # Why: Keep lifecycle transitions durable and source paths private to local storage.
-    # How: Save the public typed record with a separately stored executor-only source path.
+    # Saves the current record for a working copy.
+    # Stores its source path separately from the public details.
     def save(self, record: WorktreeRecord, source: Path) -> None:
         self.store.write(
             f"worktree-{record.id}.json",
             {"record": record.model_dump(mode="json"), "source": str(source)},
         )
 
-    # Why: Enforce worktree prerequisites instead of silently initializing or committing user files.
-    # How: Inspect source state, check branch/destination and create a branch at verified HEAD.
+    # Creates a managed working copy at the source's current commit.
+    # Checks the repository, branch and destination before asking Git to create it.
     def create(self, value: str) -> WorktreeRecord:
         with self.lock:
             source = workspace_path(value, self.settings.allowed_roots)
@@ -123,7 +123,6 @@ class WorktreeManager:
                 warnings=warnings,
                 status="creating",
             )
-            # Record ownership first so a storage failure cannot orphan an unknown worktree.
             self.save(record, source)
             try:
                 git(source, "worktree", "add", "-b", branch, str(destination), metadata.head)
@@ -135,8 +134,8 @@ class WorktreeManager:
             self.save(record, source)
             return self.inspect(identifier)
 
-    # Why: Report live status while refusing to operate on replaced or unregistered directories.
-    # How: Cross-check Git's worktree listing, branch and commit against the ownership record.
+    # Returns the current state of a managed working copy.
+    # Checks its directory, branch and commit against the ownership record.
     def inspect(self, identifier: str) -> WorktreeRecord:
         with self.lock:
             record, source = self.load(identifier)
@@ -170,16 +169,16 @@ class WorktreeManager:
                 )
             return record
 
-    # Why: Expose only recorded worktrees rather than arbitrary Git destinations.
-    # How: Inspect each application registry entry and return its current lifecycle metadata.
+    # Lists working copies recorded by the application.
+    # Inspects each registered copy and returns its current status.
     def list(self) -> list[WorktreeRecord]:
         return [
             self.inspect(path.stem.removeprefix("worktree-"))
             for path in sorted(self.store.directory.glob("worktree-*.json"))
         ]
 
-    # Why: Protect changes in temporary worktrees and never force-remove unknown directories.
-    # How: Verify ownership, require discard consent and remove only recorded branches.
+    # Removes a managed working copy and its recorded branch.
+    # Checks ownership and requires consent before discarding changes.
     def remove(self, identifier: str, discard_changes: bool = False) -> WorktreeRecord:
         with self.lock:
             record = self.inspect(identifier)
@@ -197,12 +196,10 @@ class WorktreeManager:
             if discard_changes:
                 args.append("--force")
             try:
-                # Persist cleanup intent so a failed branch deletion can be retried safely.
                 record.status = "cleanup_failed"
                 self.save(record, source)
                 if Path(record.location).exists():
                     git(source, *args, record.location)
-                # Only the generated branch is deleted; the source branch is never changed.
                 if git(source, "show-ref", "--verify", f"refs/heads/{record.branch}", check=False):
                     git(source, "branch", "-D", record.branch)
             except AppError:

@@ -8,17 +8,17 @@ from voxops.core.errors import AppError
 from voxops.domain.models import AnalysisResult
 
 
-# Why: Persist local scan results independently of future hosted databases or checkpoints.
-# How: Write validated JSON through owner-private temporary files and atomic replacement.
+# Stores the results of local project scans.
+# Writes private JSON files outside the scanned project.
 class ScanStore:
-    # Why: Keep storage ownership and synchronization scoped to one application instance.
-    # How: Canonicalize the configured local data directory and use a reentrant write lock.
+    # Sets up the directory used for scan records.
+    # Resolves the configured path and creates a lock for writes.
     def __init__(self, directory: Path):
         self.directory = directory.resolve()
         self.lock = RLock()
 
-    # Why: Provide durable, complete JSON records despite interrupted writes.
-    # How: Flush a private temporary file before atomically replacing the destination.
+    # Saves a JSON record without leaving a partial result.
+    # Writes and flushes a private temporary file before replacing the destination.
     def write(self, name: str, value: dict) -> None:
         with self.lock:
             try:
@@ -39,13 +39,13 @@ class ScanStore:
                 if "temporary" in locals():
                     temporary.unlink(missing_ok=True)
 
-    # Why: Persist only the validated, value-sanitized aggregate contract.
-    # How: Serialize the typed result under its generated scan identifier.
+    # Saves the result of a project scan.
+    # Uses the scan's generated identifier as its record name.
     def save(self, result: AnalysisResult) -> None:
         self.write(f"scan-{result.scan.id}.json", result.model_dump(mode="json"))
 
-    # Why: Report readiness of the only required local service accurately.
-    # How: Exercise private file creation and deletion without needing model/STT credentials.
+    # Checks whether local scan storage is usable.
+    # Creates and removes a private test file in the storage directory.
     def ready(self) -> bool:
         try:
             self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)

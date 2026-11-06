@@ -1,11 +1,11 @@
 from pydantic import BaseModel, ConfigDict
 
 
-# Why: Keep error categories stable without exposing exception text or machine paths.
-# How: Carry an allowlisted category, explanation and HTTP status across boundaries.
+# Carries an error that can be returned to an API caller.
+# Keeps the public category and message separate from internal exceptions.
 class AppError(Exception):
-    # Why: Preserve actionable errors through graph and API handling.
-    # How: Store safe fields separately from any internal exception cause.
+    # Creates an error with a public category and message.
+    # Stores the HTTP status alongside those fields.
     def __init__(self, category: str, message: str, status: int = 400):
         super().__init__(message)
         self.category = category
@@ -13,15 +13,15 @@ class AppError(Exception):
         self.status = status
 
 
-# Why: Define a serializable public error envelope.
-# How: Permit only category and safe explanation, rejecting unknown fields.
+# Holds the public details of an error.
+# Allows a category and explanation while rejecting extra fields.
 class ErrorDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     category: str
     message: str
 
 
-# Why: Give every unsuccessful API request a consistent typed response.
-# How: Wrap the public error detail under one stable error key.
+# Holds the response sent when a request fails.
+# Places the public error details under the error key.
 class ErrorResponse(BaseModel):
     error: ErrorDetail

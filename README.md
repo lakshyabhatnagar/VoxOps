@@ -1,4 +1,4 @@
-# VoxOps — Stage 1
+# VoxOps
 
 The Python package and CLI are `voxops`; service settings use the `VOXOPS_` prefix.
 Previous development runtime records are preserved unchanged in `.voxops/archive/legacy`.
@@ -84,8 +84,7 @@ Configure settings with environment variables; `.env.example` contains names/pla
 
 No model credential is required for deterministic scans or readiness. A configured model is called
 only for uncertainty or `use_llm=true`; failures return deterministic findings plus warnings. Model
-access is optional and may incur the configured provider's charges. Source secrets and raw source
-are not model inputs. `VITE_` and `NEXT_PUBLIC_` configuration names are marked browser-exposed
+access is optional and may incur the configured provider's charges. Stage 1 does not send source secrets or raw source as model inputs. `VITE_` and `NEXT_PUBLIC_` configuration names are marked browser-exposed
 build-time configuration; this is exposure metadata, not permission to put secrets in browser code.
 
 Run the high-value offline tests and lint:
@@ -118,9 +117,14 @@ trusted single-process local tool, not a public server or a security sandbox. Sc
 conservative syntax matching can leave dynamic framework settings unresolved. Local JSON results
 are not durable LangGraph checkpoints or production crash-resume support.
 
-Deferred: cloud ranking/selection/auth/deployment, provider adapters, generated artifacts and repair
-workers, Docker execution, GitHub publishing, hosted persistence, Clerk, billing/quotas, VS Code
-UI, production speech navigation, wake words and TTS. Stage 1 performs none of these actions.
+Stage 2 adds artifact planning, bounded generation and validation, review, and GitHub publication.
+The offline acceptance suite and actual loopback HTTP/Git demo pass. Stage 2 does not deploy
+applications. Live GitHub/model calls, image builds and GitHub CI execution remain untested. See [Stage 2 usage](docs/stage2-usage.md),
+[architecture](docs/stage2-architecture.md), [decisions](docs/stage2-decisions.md),
+[security](docs/stage2-security.md), and [verification](docs/stage2-verification.md).
+
+Deferred work includes cloud selection and deployment, provider adapters, hosted persistence,
+Clerk, billing, VS Code UI, and production speech navigation.
 
 See the [completion report](docs/stage1-verification.md) for the final project tree, requirement
 evidence, exact verification commands and observed results.

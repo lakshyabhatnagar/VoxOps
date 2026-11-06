@@ -9,8 +9,8 @@ from voxops.domain.models import GitMetadata
 GIT_COMMANDS = {"rev-parse", "symbolic-ref", "status", "remote", "show-ref", "worktree", "branch"}
 
 
-# Why: Keep Git invocation narrow, bounded and free from shell evaluation or project hooks.
-# How: Allowlist commands and disable fsmonitor, hooks, prompting and optional locks.
+# Runs a read-only Git inspection command.
+# Restricts the command and disables hooks, prompts and optional locks.
 def git(path: Path, *args: str, check: bool = True) -> str:
     if not args or args[0] not in GIT_COMMANDS:
         raise AppError("git_command_forbidden", "Git operation is not permitted.")
@@ -73,8 +73,8 @@ def git(path: Path, *args: str, check: bool = True) -> str:
     return result.stdout.strip() if not result.returncode else ""
 
 
-# Why: Distinguish scan-safe repositories from worktree-ready committed roots.
-# How: Inspect Git metadata through read-only commands without initializing or committing.
+# Collects the Git status needed for project analysis.
+# Checks repository metadata without creating a repository or commit.
 def inspect_git(path: Path) -> GitMetadata:
     if not shutil.which("git"):
         return GitMetadata(status="git_unavailable")

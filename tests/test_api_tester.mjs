@@ -7,16 +7,16 @@ const buttons = [{disabled: false}];
 const requests = [];
 let nextResponse = {};
 
-// Why: Supply the browser's basic input-validation result for request-contract tests.
-// How: Accept valid fixture inputs without requiring a browser renderer.
+// Pretends the test form contains valid input.
+// Returns true so the test can reach the code that sends the request.
 function valid() { return true; }
 
-// Why: Ignore browser event and focus side effects unrelated to request payloads.
-// How: Provide a no-op method for the minimal DOM fixture.
+// Does nothing when the test page tries to focus a field or stop an event.
+// These browser actions are not needed to check which API request is sent.
 function noop() {}
 
-// Why: Exercise response rendering and auto-filled fields without a DOM dependency.
-// How: Keep small mutable elements keyed by their actual page IDs.
+// Creates a small stand-in for a page field and remembers it by its ID.
+// Lets the test inspect text and values written by the real page code.
 function element(id) {
   if (!elements.has(id)) elements.set(id, {
     value: '', textContent: '', dataset: {}, reportValidity: valid,
@@ -25,32 +25,32 @@ function element(id) {
   return elements.get(id);
 }
 
-// Why: Verify pending requests restore the page's action buttons.
-// How: Return the same fixture button for each document query.
+// Returns the test buttons when the page asks for its action buttons.
+// Lets the test check that buttons become available again after a request.
 function queryButtons() { return buttons; }
 
-// Why: Represent browser form inputs in their submitted shape.
-// How: Store the action and name/value pairs used by the real page handler.
+// Holds the action and input values for a pretend form submission.
+// Gives the real page handler the same fields it would read from a browser form.
 class Form {
-  // Why: Prepare an individual form submission without a browser runtime.
-  // How: Record its dataset and fields for the FormData fixture.
+  // Sets up one test form with its chosen action and input values.
+  // Stores the values by field name so the page handler can read them.
   constructor(action, fields) { this.dataset = {action}; this.fields = new Map(fields); }
 }
 
-// Why: Preserve native FormData get/has behavior in the isolated test context.
-// How: Return the form's Map, whose lookup interface matches the handler's usage.
+// Stands in for the browser helper that reads submitted form fields.
+// Returns the test form values with the lookup methods the real handler uses.
 class Fields {
-  // Why: Expose submitted form entries to the unchanged page code.
-  // How: Return the existing name/value Map from the fixture form.
+  // Provides the values already saved in the pretend form.
+  // Lets the real page handler read those values without opening a browser.
   constructor(form) { return form.fields; }
 }
 
-// Why: Return typed API fixtures without making network or paid-provider calls.
-// How: Resolve the response data selected by the current request test.
+// Returns the API response chosen by the current test.
+// Avoids making a real network request or calling an AI service.
 async function json() { return nextResponse; }
 
-// Why: Verify exactly which API operations the page would send.
-// How: Capture fetch arguments and return an ordinary successful JSON response.
+// Records the URL and body that the page tries to send to the server.
+// Returns a pretend successful response so the page can finish handling the request.
 async function request(url, options) {
   requests.push({url, ...options});
   return {ok: true, status: 200, json};
@@ -65,8 +65,8 @@ const context = vm.createContext({
 vm.runInContext(page.split('<script>')[1].split('</script>')[0], context);
 element('path').value = '/workspace/example';
 
-// Why: Exercise the real submit handler across endpoint and cleanup-policy branches.
-// How: Dispatch a fixture submit event and assert all controls recover after the request.
+// Submits a pretend form through the real page handler.
+// Checks that the page restores its buttons after the request finishes.
 async function submit(action, fields = [], operation = '') {
   await context.submit({target: new Form(action, fields), submitter: {value: operation},
     preventDefault: noop});

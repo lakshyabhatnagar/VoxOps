@@ -14,11 +14,11 @@ from voxops.frameworks.registry import make_unit, package_manager
 from voxops.repository.startup_reader import startup_target
 
 
-# Why: Detect Python HTTP services without importing or instantiating applications.
-# How: Combine dependency declarations, constructor syntax and explicit ASGI commands.
+# Recognizes FastAPI services in Python projects.
+# Uses dependencies, application declarations and startup commands as evidence.
 class FastAPIAdapter:
-    # Why: Infer only credible application startup metadata for a Python package.
-    # How: Prefer scoped existing commands and use proven source declarations only as a fallback.
+    # Finds a FastAPI application and its startup details.
+    # Prefers existing commands and falls back to supported source declarations.
     def detect(self, manifest: ManifestSummary, scan: RepoScan) -> DeployableUnit | None:
         if manifest.kind != "python":
             return None
@@ -91,7 +91,6 @@ class FastAPIAdapter:
                     "Several startup commands match this app; confirm the selected example."
                 )
         else:
-            # A factory and its exported app describe the same module; prefer the exported object.
             exported_paths = {item.path for item in instances if item.kind == "fastapi_instance"}
             instances = [
                 item
