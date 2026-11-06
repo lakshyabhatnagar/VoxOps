@@ -1,5 +1,4 @@
 import asyncio
-import difflib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,19 +64,6 @@ class ModelBudget:
         async with self.lock:
             self.reserved -= allocation
             self.tokens += usage.input_tokens + usage.output_tokens or allocation
-
-
-# Compares an existing file with a proposed replacement line by line.
-# Returns whether the number of changed lines stays within the repair limit.
-def minimal_repair(original: str, candidate: str) -> bool:
-    before, after = original.splitlines(), candidate.splitlines()
-    changed = 0
-    for tag, first, last, other_first, other_last in difflib.SequenceMatcher(
-        a=before, b=after, autojunk=False
-    ).get_opcodes():
-        if tag != "equal":
-            changed += max(last - first, other_last - other_first)
-    return changed <= min(40, max(6, len(before) // 3))
 
 
 # Creates or checks one planned project file at a time.
@@ -151,8 +137,9 @@ class ArtifactGenerator:
             validations=findings,
         )
 
-    # Checks an existing file or asks the AI to create or repair it.
-    # Saves each attempt and returns the checked file or a reason the job stopped.
+    # Keeps an existing file when it passes the checks, otherwise asks the AI to fix it.
+    # Checks proposed replacements for file size, secrets, and rules for the requested file type.
+    # Saves attempts and checked file contents privately so they can be reviewed before use.
     async def generate(
         self, run_id: str, root: Path, task: ArtifactTask, plan: ArtifactPlan, budget: ModelBudget
     ) -> TaskResult:
@@ -266,10 +253,6 @@ class ArtifactGenerator:
                     allow_tools=self.settings.artifact_optional_tools,
                     root=root,
                 )
-                if original_bytes is not None and not minimal_repair(original, output.content):
-                    findings.append(
-                        self.failure(task, "minimal_repair", "Repair changes too many lines.")
-                    )
                 result.validations = findings
                 attempt.feedback = findings
                 if self.valid(findings):

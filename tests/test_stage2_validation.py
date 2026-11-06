@@ -312,6 +312,71 @@ def test_json_patch_syntax(tmp_path):
     assert "JSON source patch has invalid syntax." in result[0].messages
 
 
+@pytest.mark.parametrize("filename", ["settings.py", "config.json"])
+# Correct sixty port settings so the requested repair changes most of the file.
+# Check both Python and JSON files, which used to fail because too many lines changed.
+# The replacement must still pass the normal syntax and content checks.
+def test_large_requested_source_repair_passes_validation(tmp_path, filename):
+    if filename.endswith(".py"):
+        original = "".join(f"SERVICE_{index}_PORT = 8000\n" for index in range(60))
+    else:
+        import json
+
+        original = json.dumps({f"service_{index}_port": 8000 for index in range(60)}, indent=2)
+    (tmp_path / filename).write_text(original)
+    task = ArtifactTask(
+        task_id="p", artifact_type="source_patch", target_path=filename, reason="Correct all ports"
+    )
+    findings = validate_artifact(
+        task, original.replace("8000", "8080"), plan_for(task), root=tmp_path
+    )
+    assert findings[0].status == "passed", findings[0].messages
+    assert (tmp_path / filename).read_text() == original
+
+
+@pytest.mark.parametrize(
+    ("unsafe_addition", "expected_message"),
+    [
+        ('allow_origins = ["*"]\n', "wildcard CORS"),
+        ('DB_PASSWORD = "stage2_sensitive_password_value"\n', "sensitive or binary"),
+        ("def broken(:\n", "invalid syntax"),
+    ],
+)
+# Add unsafe content to an otherwise valid repair of sixty settings.
+# Larger repairs must still reject wildcard CORS, credentials, and broken Python syntax.
+# Check the specific reason so removing a line-count limit cannot hide a weakened check.
+def test_large_source_repair_still_rejects_unsafe_content(
+    tmp_path, unsafe_addition, expected_message
+):
+    original = "".join(f"SERVICE_{index}_PORT = 8000\n" for index in range(60))
+    (tmp_path / "settings.py").write_text(original)
+    task = ArtifactTask(
+        task_id="p", artifact_type="source_patch", target_path="settings.py", reason="Correct ports"
+    )
+    replacement = original.replace("8000", "8080") + unsafe_addition
+    findings = validate_artifact(task, replacement, plan_for(task), root=tmp_path)
+    assert findings[0].status == "failed"
+    assert any(expected_message in message for message in findings[0].messages)
+
+
+@pytest.mark.parametrize("character", ["a", "é"])
+# Propose ASCII and non-ASCII source files larger than the supported file-size limit.
+# Check that allowing larger repairs does not allow unbounded file contents.
+# The failure must describe file size rather than the number of changed lines.
+def test_source_repair_keeps_file_size_limit(tmp_path, character):
+    (tmp_path / "settings.py").write_text("PORT = 8000\n")
+    task = ArtifactTask(
+        task_id="p",
+        artifact_type="source_patch",
+        target_path="settings.py",
+        reason="Repair settings",
+    )
+    replacement = 'VALUE = "' + character * 131072 + '"\n'
+    findings = validate_artifact(task, replacement, plan_for(task), root=tmp_path)
+    assert findings[0].status == "failed"
+    assert "Artifact exceeds the size limit." in findings[0].messages
+
+
 @pytest.mark.parametrize("binding", ["VITE_PRIVATE_TOKEN", "NEXT_PUBLIC_API_KEY"])
 # Change browser-facing code to reference a server secret.
 # Check that validation blocks the edit even without a literal secret value.

@@ -12,6 +12,8 @@ A task has at most three content attempts, subject to shared request and token b
 
 Model credentials are optional for planning and validation of existing artifacts. Missing credentials leave required generation blocked. They do not produce placeholder artifacts.
 
+Valid existing deployment files are kept unchanged. Empty or broken deployment files may be replaced completely when needed. Requested application source repairs can also change as many lines as the correction needs. Neither a changed-line count nor a percentage of the original file decides acceptance. File-size limits, syntax checks, secret and path protections, exact file ownership, and approval before publication still apply.
+
 ## Source and publication
 
 The source repository is preserved. A new private repository requires a baseline review. For existing committed history, the baseline contains all tracked files, rather than a selected subset of history. For a repository without a commit, the baseline contains the explicitly selected safe files. Dirty source changes require an explicit snapshot selection and review, including omitted paths. Publication uses a separate branch and requires artifact review and approval.
