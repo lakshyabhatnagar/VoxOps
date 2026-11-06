@@ -12,9 +12,11 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture(autouse=True)
 # Remove model service keys from the environment before each test.
 # This keeps tests from using a developer’s real account.
+# Tests that check a provider must explicitly supply their own fake key.
 def no_credentials(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
 
 
 # Copy a sample repository into the test’s temporary folder.

@@ -5,27 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VoxOps API tester</title>
   <style>
+    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    body { margin: 0 auto; max-width: 1080px; padding: 28px 20px; color: #20252b; background: #f6f7f8; font: 15px/1.5 system-ui, sans-serif; }
+    body { margin: 0 auto; max-width: 1080px; padding: 28px 20px; color: #e5eaf0; background: #0f141b; font: 15px/1.5 system-ui, sans-serif; }
     h1 { font-size: 26px; margin: 0; } h2 { font-size: 18px; margin: 0 0 12px; }
-    p { margin: 8px 0 16px; } .muted, small { color: #5c6670; }
+    p { margin: 8px 0 16px; } .muted, small { color: #a6b2c1; }
+    a { color: #9bbcff; } a:visited { color: #cfb5ff; }
     main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    section { min-width: 0; background: white; border: 1px solid #dce0e4; border-radius: 8px; padding: 20px; }
+    section { min-width: 0; background: #18202b; border: 1px solid #354153; border-radius: 8px; padding: 20px; }
     .wide { grid-column: 1 / -1; }
     label { display: block; margin: 12px 0 5px; font-weight: 600; }
-    input:not([type=checkbox]), textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #b7c0c9; border-radius: 4px; font: inherit; background: white; color: inherit; }
+    input:not([type=checkbox]), textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #627086; border-radius: 4px; font: inherit; background: #10161f; color: inherit; }
+    input::placeholder, textarea::placeholder { color: #a6b2c1; opacity: 1; }
     textarea { resize: vertical; min-height: 75px; }
     .check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
-    input[type=checkbox] { width: 17px; height: 17px; }
+    input[type=checkbox] { width: 17px; height: 17px; accent-color: #9bbcff; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-    button { padding: 9px 13px; border: 1px solid #b7c0c9; border-radius: 4px; background: #fff; color: #20252b; font: inherit; cursor: pointer; }
-    button.primary { background: #245ad6; border-color: #245ad6; color: #fff; }
-    button.danger { color: #a82525; border-color: #d7aaaa; }
+    button { padding: 9px 13px; border: 1px solid #627086; border-radius: 4px; background: #273345; color: #e5eaf0; font: inherit; cursor: pointer; }
+    button:hover:not(:disabled) { background: #34445b; }
+    button.primary { background: #2857ba; border-color: #7da5ff; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #3265d2; }
+    button.danger { color: #ffa6ad; border-color: #b16d77; }
     button:disabled { opacity: .55; cursor: wait; }
     :focus-visible { outline: 3px solid #83aaff; outline-offset: 2px; }
-    #status { font-weight: 600; } #status[data-error=true] { color: #a82525; }
+    #status { font-weight: 600; } #status[data-error=true] { color: #ffa6ad; }
     #summary { white-space: pre-wrap; overflow-wrap: anywhere; }
-    pre { max-height: 520px; overflow: auto; padding: 14px; background: #f3f5f7; border-radius: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre { max-height: 520px; overflow: auto; padding: 14px; background: #10161f; border-radius: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 700px) { main { grid-template-columns: 1fr; } body { padding: 20px 12px; } }
   </style>
 </head>
