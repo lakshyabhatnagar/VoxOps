@@ -17,14 +17,17 @@ class TopologyResolver:
     def __init__(self, settings: Settings, agent: Agent[None, TopologyOutput] | None = None):
         self.settings, self.agent = settings, agent
 
-    # Reports whether the optional assistant can be used.
-    # Checks for a supplied assistant or an API key for the configured AI service.
+    # Check whether the caller supplied an assistant or configured a supported provider's key.
+    # Match the key to the selected provider, so another service's key does not enable it.
+    # Return false when analysis should continue using only the local detection rules.
     def available(self) -> bool:
         return self.agent is not None or bool(
             self.settings.model.startswith("anthropic:")
             and self.settings.anthropic_api_key
             or self.settings.model.startswith("openai:")
             and self.settings.openai_api_key
+            or self.settings.model.startswith("nvidia:")
+            and self.settings.nvidia_api_key
         )
 
     # Prepares project facts for the optional assistant.

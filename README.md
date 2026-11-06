@@ -67,6 +67,7 @@ Response excerpt (IDs and timestamps vary):
 This is an excerpt, not the full response schema. Full typed schemas are on `/docs`.
 
 Configure settings with environment variables; `.env.example` contains names/placeholders only:
+Settings do not load `.env` automatically. Use `uv run --env-file .env voxops` to load it.
 
 | Setting | Default / meaning |
 | --- | --- |
@@ -80,6 +81,7 @@ Configure settings with environment variables; `.env.example` contains names/pla
 | `VOXOPS_MODEL` | `anthropic:claude-sonnet-4-5`; replaceable provider/model string |
 | `ANTHROPIC_API_KEY` | Optional secret, environment only |
 | `OPENAI_API_KEY` | Optional alternative provider secret, environment only |
+| `NVIDIA_API_KEY` | Optional NVIDIA secret; use `nvidia:mistralai/mistral-large-4-1t-a52b` |
 | `GNANI_API_KEY` | Reserved; does not enable unverified live transport |
 
 No model credential is required for deterministic scans or readiness. A configured model is called
@@ -122,6 +124,10 @@ The offline acceptance suite and actual loopback HTTP/Git demo pass. Stage 2 doe
 applications. Live GitHub/model calls, image builds and GitHub CI execution remain untested. See [Stage 2 usage](docs/stage2-usage.md),
 [architecture](docs/stage2-architecture.md), [decisions](docs/stage2-decisions.md),
 [security](docs/stage2-security.md), and [verification](docs/stage2-verification.md).
+
+For NVIDIA model setup, GitHub authentication, and a complete disposable publishing exercise,
+follow [integration testing](docs/integration-testing.md). The sample environment selects NVIDIA
+with a 60-second timeout and one generation worker. Deterministic scans still work without a key.
 
 Deferred work includes cloud selection and deployment, provider adapters, hosted persistence,
 Clerk, billing, VS Code UI, and production speech navigation.

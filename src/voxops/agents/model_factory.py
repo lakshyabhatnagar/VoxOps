@@ -9,8 +9,9 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from voxops.core.settings import Settings
 
 
-# Builds the configured Anthropic or OpenAI model when its API key is available.
-# Returns nothing for an unsupported provider or a missing key.
+# Read the provider name and model name from the application's settings.
+# Build its client using that provider's own key; NVIDIA calls go to NVIDIA's fixed address.
+# Return nothing when the provider is unsupported or its key has not been supplied.
 def create_model(settings: Settings) -> ProviderModel | None:
     provider, _, name = settings.model.partition(":")
     if provider == "anthropic" and settings.anthropic_api_key:
@@ -29,6 +30,22 @@ def create_model(settings: Settings) -> ProviderModel | None:
                 openai_client=AsyncOpenAI(
                     api_key=settings.openai_api_key.get_secret_value(), max_retries=0
                 )
+            ),
+        )
+    if provider == "nvidia" and settings.nvidia_api_key:
+        return OpenAIChatModel(
+            name,
+            provider=OpenAIProvider(
+                openai_client=AsyncOpenAI(
+                    base_url="https://integrate.api.nvidia.com/v1",
+                    api_key=settings.nvidia_api_key.get_secret_value(),
+                    max_retries=0,
+                )
+            ),
+            settings=(
+                {"openai_reasoning_effort": "low"}
+                if name == "mistralai/mistral-large-4-1t-a52b"
+                else None
             ),
         )
     return None

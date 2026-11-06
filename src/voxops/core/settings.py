@@ -4,8 +4,9 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Holds the application's local paths and service settings.
-# Reads and checks environment values without requiring cloud credentials.
+# Read application paths, limits, and service choices from environment variables.
+# Keep each provider's optional key separate and hide key values when settings are printed.
+# Check local paths and limits even when no external service has been configured.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VOXOPS_", extra="ignore")
     allowed_roots: list[Path] = Field(default_factory=lambda: [Path.cwd()])
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     git_author_email: str = "voxops@localhost"
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    nvidia_api_key: SecretStr | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
 
     @field_validator("allowed_roots")
     # Checks the directories allowed for workspace access.
