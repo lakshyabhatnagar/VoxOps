@@ -2,17 +2,14 @@ from typing import Literal
 
 from pydantic import Field
 from pydantic_ai import Agent
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 
+from voxops.agents.model_factory import create_model
 from voxops.core.settings import Settings
 from voxops.domain.models import Model, Role
 
 
-# Why: Constrain optional inference to known units and deployment roles.
-# How: Validate bounded typed assessments instead of accepting arbitrary topology JSON.
+# Records the AI's assessment of one detected app unit and its role.
+# Includes a confidence score and whether the evidence supports the conclusion.
 class TopologyAssessment(Model):
     unit_id: str = Field(pattern=r"^[a-f0-9]{16}$")
     role: Role
@@ -20,25 +17,17 @@ class TopologyAssessment(Model):
     conclusion: Literal["supported", "uncertain"]
 
 
-# Why: Keep specialist output small and free of executable actions or free-form source echoes.
-# How: Accept at most thirty-two structured unit assessments with no tools or destinations.
+# Holds the AI's assessments of detected app units.
+# Allows at most 32 assessments in one response.
 class TopologyOutput(Model):
     assessments: list[TopologyAssessment] = Field(default_factory=list, max_length=32)
 
 
-# Why: Make model selection replaceable without requiring credentials for local analysis.
-# How: Construct one supported provider explicitly from secret environment settings.
+# Creates the AI assistant that assesses detected app units.
+# Returns nothing when no model is configured and gives the assistant no tools.
 def create_agent(settings: Settings) -> Agent[None, TopologyOutput] | None:
-    provider, _, name = settings.model.partition(":")
-    if provider == "anthropic" and settings.anthropic_api_key:
-        model = AnthropicModel(
-            name, provider=AnthropicProvider(api_key=settings.anthropic_api_key.get_secret_value())
-        )
-    elif provider == "openai" and settings.openai_api_key:
-        model = OpenAIChatModel(
-            name, provider=OpenAIProvider(api_key=settings.openai_api_key.get_secret_value())
-        )
-    else:
+    model = create_model(settings)
+    if model is None:
         return None
     return Agent(
         model, output_type=TopologyOutput, retries=0, instrument=False, instructions=INSTRUCTIONS
