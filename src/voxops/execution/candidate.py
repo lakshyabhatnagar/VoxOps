@@ -299,7 +299,7 @@ def require_publishable(
             raise AppError(
                 "verification_stale", "Health evidence lacks the declared contract.", 409
             )
-    if any(
+    if execution.env_schema.ambiguities or any(
         item.necessity == "unknown"
         or item.resolution == "ambiguous"
         or (item.necessity == "required" and item.resolution == "missing")

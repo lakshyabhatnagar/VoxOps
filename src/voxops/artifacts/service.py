@@ -18,6 +18,8 @@ from voxops.domain.artifact_models import (
     Strategy,
 )
 from voxops.domain.models import AIUsage
+from voxops.execution.candidate import candidate_identity
+from voxops.execution.environment import EnvironmentManager
 from voxops.github.publisher import GitPublisher
 from voxops.repository.git_inspector import inspect_git
 from voxops.repository.path_policy import fingerprint, workspace_path
@@ -123,6 +125,96 @@ class ArtifactService:
         self.generator = generator or ArtifactGenerator(settings, self.store)
         self.publisher = publisher or GitPublisher(settings, self.store, worktrees)
         self.analysis = Stage1Workflow(settings, scans)
+        self.environment = EnvironmentManager()
+
+    def _environment_run(self, run_id: str, *, allow_active: bool = False):
+        run = self.store.load_run(run_id)
+        if run.execution is None or not run.worktree_id:
+            raise AppError(
+                "verification_not_prepared", "Execution verification is not prepared.", 409
+            )
+        if run.status in {"rejected", "cancelled", "ready_for_deployment", "publishing"} or (
+            run.execution.status == "verifying" and not allow_active
+        ):
+            raise AppError(
+                "verification_busy", "Environment configuration cannot be edited now.", 409
+            )
+        source = self.publisher.source(run)
+        destination = Path(self.worktrees.inspect(run.worktree_id).location)
+        _, inventory = capture_source(destination, self.settings.max_file_bytes)
+        expected = candidate_identity(
+            run,
+            inventory,
+            run.execution.plan,
+            run.execution.env_schema,
+            self.settings,
+            run.execution.execution_id,
+        )
+        if run.execution.identity != expected:
+            raise AppError(
+                "verification_stale",
+                "Execution candidate changed; prepare verification again.",
+                409,
+            )
+        return run, source, destination, inventory
+
+    def prepare_environment(self, run_id: str):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run, source, destination, inventory = self._environment_run(run_id)
+            before = run.execution.env_schema.scan_id
+            form = self.environment.prepare(run, destination, source)
+            if not before:
+                self.environment._invalidate(run)
+                run.execution.identity = candidate_identity(
+                    run,
+                    inventory,
+                    run.execution.plan,
+                    run.execution.env_schema,
+                    self.settings,
+                    run.execution.execution_id,
+                )
+            self.store.save_run(run)
+            return form
+
+    def environment_form(self, run_id: str):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run, source, destination, _ = self._environment_run(run_id)
+            try:
+                return self.environment.form(run, source, destination)
+            finally:
+                self.store.save_run(run)
+
+    def submit_environment(self, run_id: str, expected_digest: str, values: dict[str, str]):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run, source, destination, _ = self._environment_run(run_id)
+            try:
+                return self.environment.submit(run, source, destination, expected_digest, values)
+            finally:
+                self.store.save_run(run)
+
+    def environment_authority(self, run_id: str, expected_generation: str | None = None):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run, source, destination, _ = self._environment_run(run_id, allow_active=True)
+            try:
+                return self.environment.authority(run, source, destination, expected_generation)
+            finally:
+                self.store.save_run(run)
+
+    def clear_environment(self, run_id: str):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run = self.store.load_run(run_id)
+            self.environment.clear(run_id)
+            if run.execution is not None:
+                self.environment._invalidate(run)
+                for item in run.execution.env_schema.requirements:
+                    if item.resolution in {"existing_env", "supplied", "default"}:
+                        item.resolution = "missing"
+                self.store.save_run(run)
 
     # Scans the project and makes a plan from the chosen strategies and source edits.
     # Checks that the source stayed unchanged during the scan, then saves the plan.

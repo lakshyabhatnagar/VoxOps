@@ -42,6 +42,21 @@ class ApprovalRequest(Model):
     decision: Literal["approve", "reject"]
 
 
+class EnvValuesRequest(Model):
+    schema_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    values: dict[str, str] = Field(max_length=3000)
+
+
+@router.get("/{run_id}/verification/env-form")
+def environment_form(run_id: str, request: Request):
+    return request.app.state.artifacts.environment_form(run_id)
+
+
+@router.post("/{run_id}/verification/env-values")
+def submit_environment(run_id: str, body: EnvValuesRequest, request: Request):
+    return request.app.state.artifacts.submit_environment(run_id, body.schema_digest, body.values)
+
+
 @router.post("/plan", response_model=ArtifactPlan)
 # Creates a plan for files that may be generated.
 # Scans the source and returns ownership and unresolved questions for inspection.

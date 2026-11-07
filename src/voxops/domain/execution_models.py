@@ -66,6 +66,7 @@ class EnvRequirement(Model):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     consumers: list[EnvConsumer] = Field(min_length=1)
     scope: str = "."
+    case_sensitive: bool = True
     necessity: Literal["required", "optional", "unknown"]
     default_kind: Literal["absent", "literal", "none", "dynamic"] = "absent"
     visibility: Literal["public", "secret", "unknown"] = "unknown"
@@ -88,6 +89,9 @@ class EnvFormSchema(Model):
     schema_version: Literal["1"] = "1"
     source_digest: Digest
     revision: int = Field(default=1, ge=1)
+    scan_id: str = ""
+    ambiguities: list[EnvEvidence] = Field(default_factory=list)
+    env_files: dict[str, list[str]] = Field(default_factory=dict)
     requirements: list[EnvRequirement] = Field(default_factory=list)
 
     @model_validator(mode="after")
