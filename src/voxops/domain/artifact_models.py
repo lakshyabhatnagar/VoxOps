@@ -4,6 +4,12 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from voxops.domain.execution_models import (
+    ExecutionAttestation,
+    ExecutionPlan,
+    ExecutionRun,
+    IncompleteAcknowledgement,
+)
 from voxops.domain.models import AIUsage, DeployableUnit, Model
 
 Strategy = Literal["container", "static", "native"]
@@ -237,6 +243,8 @@ class ChangeReview(Model):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime
     digest: str = ""
+    execution_attestation: ExecutionAttestation | None = None
+    attestation_digest: str | None = None
 
 
 # Records a person's approval or rejection of one review.
@@ -248,6 +256,7 @@ class ApprovalRecord(Model):
     run_id: str
     digest: str
     decision: Literal["approve", "reject"]
+    incomplete_acknowledgement: IncompleteAcknowledgement | None = None
     decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -277,6 +286,9 @@ class GitPublishResult(Model):
     review_id: str
     status: Literal["ready_for_deployment"] = "ready_for_deployment"
     deployment_executed: Literal[False] = False
+    verification_status: Literal["passed", "verification_incomplete"] | None = None
+    execution_attestation: ExecutionAttestation | None = None
+    execution_plan: ExecutionPlan | None = None
     published_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -310,6 +322,7 @@ class ArtifactRun(Model):
         "cancelled",
         "blocked",
     ] = "planning"
+    execution: ExecutionRun | None = None
     tasks: dict[str, TaskResult] = Field(default_factory=dict)
     reviews: dict[str, ChangeReview] = Field(default_factory=dict)
     approvals: dict[str, ApprovalRecord] = Field(default_factory=dict)
