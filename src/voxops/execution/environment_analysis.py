@@ -560,6 +560,7 @@ class Analyzer:
 
     def scan(self):
         count = total = 0
+        metadata = []
         for unit in self.units:
             if unit.language == "python":
                 self.env_files.setdefault(unit.root_path, []).append(".env")
@@ -629,15 +630,16 @@ class Analyzer:
                                 r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", entry
                             )
                             if match:
-                                self.add(
-                                    unit,
-                                    path,
-                                    line,
-                                    match.group(1),
-                                    phase="runtime",
-                                    necessity="optional",
-                                    kind="example",
-                                    detail="Example key",
+                                metadata.append(
+                                    (
+                                        unit,
+                                        path,
+                                        line,
+                                        match.group(1),
+                                        "runtime",
+                                        "example",
+                                        "Example key",
+                                    )
                                 )
                     elif filename.endswith(".py"):
                         self.python(unit, path, content)
@@ -645,16 +647,36 @@ class Analyzer:
                         self.javascript(unit, path, content)
             for item in unit.config_requirements:
                 phase = "build" if item.stage == "build_time" else "runtime"
-                self.add(
-                    unit,
-                    unit.root_path,
-                    None,
-                    item.name,
-                    phase=phase,
-                    necessity="optional",
-                    kind="stage1",
-                    detail="Stage 1 candidate",
+                metadata.append(
+                    (unit, unit.root_path, None, item.name, phase, "stage1", "Stage 1 candidate")
                 )
+        source_fields = {}
+        for item in self.requirements.values():
+            for consumer in item.consumers:
+                key = (item.scope, consumer.unit_id, consumer.phase, item.name.lower())
+                source_fields.setdefault(key, []).append(item)
+        for unit, path, line, name, phase, kind, detail in metadata:
+            matches = [
+                item
+                for item in source_fields.get((unit.root_path, unit.id, phase, name.lower()), [])
+                if item.name == name or not item.case_sensitive
+            ]
+            if matches:
+                evidence = EnvEvidence(path=path, line=line, kind=kind, detail=detail)
+                for item in matches:
+                    if evidence not in item.evidence and len(item.evidence) < 30:
+                        item.evidence.append(evidence)
+                continue
+            self.add(
+                unit,
+                path,
+                line,
+                name,
+                phase=phase,
+                necessity="optional",
+                kind=kind,
+                detail=detail,
+            )
         schema = EnvFormSchema(
             source_digest=self.source_digest,
             scan_id=uuid4().hex,

@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
+import pytest
+
 from voxops.domain.execution_models import EnvFormSchema
-from voxops.domain.models import DeployableUnit, FrameworkDetection, RuntimeSpec
-from voxops.execution.environment import EnvironmentManager
+from voxops.domain.models import ConfigRequirement, DeployableUnit, FrameworkDetection, RuntimeSpec
+from voxops.execution.environment import EnvironmentManager, SecretSession
 from voxops.execution.environment_analysis import Analyzer
 
 
@@ -149,3 +151,132 @@ def test_nested_units_do_not_inherit_each_others_sources(tmp_path):
     assert [(item.unit_id, item.phase) for item in fields["VITE_API_URL"].consumers] == [
         ("web", "build")
     ]
+
+
+@pytest.mark.parametrize("metadata", ["stage1", "example", "both"])
+def test_metadata_for_settings_key_produces_one_prompt_and_runtime_value(tmp_path, metadata):
+    (tmp_path / "settings.py").write_text("""
+from pydantic_settings import BaseSettings
+class Settings(BaseSettings):
+    TOKEN: str
+""")
+    app = unit()
+    if metadata in {"stage1", "both"}:
+        app.config_requirements = [
+            ConfigRequirement(name="TOKEN", stage="runtime", presence="referenced")
+        ]
+    if metadata in {"example", "both"}:
+        (tmp_path / ".env.example").write_text("TOKEN=example-secret\n")
+
+    schema, defaults = Analyzer(tmp_path, [app], "a" * 64).scan()
+
+    assert len(schema.requirements) == 1
+    field = schema.requirements[0]
+    assert (field.name, field.case_sensitive, field.necessity) == ("TOKEN", False, "required")
+    expected_kinds = {"python"} | ({"stage1", "example"} if metadata == "both" else {metadata})
+    assert {item.kind for item in field.evidence} == expected_kinds
+    assert not schema.ambiguities
+    assert not defaults
+    session = SecretSession(schema)
+    session.submit({field.field_id: "submitted-secret"})
+    with session.runtime_file(app.id) as path:
+        assert path.read_text() == "TOKEN=submitted-secret\n"
+
+
+def test_metadata_retains_static_name_type_and_private_default(tmp_path):
+    (tmp_path / ".env.example").write_text("workers=99\nsecret=example-secret\n")
+    (tmp_path / "settings.py").write_text("""
+from pydantic_settings import BaseSettings
+class Settings(BaseSettings):
+    WORKERS: int = 2
+    SECRET: str = 'private-static-default'
+""")
+    app = unit()
+    app.config_requirements = [ConfigRequirement(name="workers", stage="runtime")]
+
+    schema, defaults = Analyzer(tmp_path, [app], "a" * 64).scan()
+
+    assert len(schema.requirements) == 2
+    fields = {field.name: field for field in schema.requirements}
+    workers = fields["WORKERS"]
+    assert (workers.case_sensitive, workers.necessity, workers.value_type) == (
+        False,
+        "optional",
+        "integer",
+    )
+    assert (workers.default_kind, workers.resolution) == ("literal", "default")
+    assert defaults[workers.field_id] == "2"
+    assert defaults[fields["SECRET"].field_id] == "private-static-default"
+    assert "private-static-default" not in schema.model_dump_json()
+    assert not schema.ambiguities
+
+
+def test_metadata_keeps_case_sensitive_keys_and_phases_distinct(tmp_path):
+    (tmp_path / ".env.example").write_text("TOKEN=example\ntoken=example\n")
+    (tmp_path / "settings.py").write_text("""
+from pydantic_settings import BaseSettings, SettingsConfigDict
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(case_sensitive=True)
+    TOKEN: str
+    token: str
+""")
+    app = unit()
+    app.config_requirements = [
+        ConfigRequirement(name="TOKEN", stage="build_time"),
+        ConfigRequirement(name="TOKEN", stage="runtime"),
+    ]
+
+    schema, _ = Analyzer(tmp_path, [app], "a" * 64).scan()
+
+    assert {(field.name, field.consumers[0].phase) for field in schema.requirements} == {
+        ("TOKEN", "runtime"),
+        ("token", "runtime"),
+        ("TOKEN", "build"),
+    }
+    assert len(schema.requirements) == 3
+    assert all(field.case_sensitive for field in schema.requirements)
+    assert not schema.ambiguities
+
+
+def test_metadata_does_not_mask_conflicting_static_defaults(tmp_path):
+    (tmp_path / ".env.example").write_text("workers=99\n")
+    (tmp_path / "settings.py").write_text("""
+from pydantic_settings import BaseSettings
+class One(BaseSettings):
+    WORKERS: int = 2
+class Two(BaseSettings):
+    WORKERS: int = 5
+""")
+    app = unit()
+    app.config_requirements = [ConfigRequirement(name="WORKERS", stage="runtime")]
+
+    schema, _ = Analyzer(tmp_path, [app], "a" * 64).scan()
+
+    assert len(schema.requirements) == 1
+    assert {item.detail for item in schema.ambiguities} == {"Environment defaults conflict"}
+    assert {item.kind for item in schema.requirements[0].evidence} == {
+        "python",
+        "stage1",
+        "example",
+    }
+
+
+def test_metadata_keeps_scopes_and_consumers_distinct(tmp_path):
+    (tmp_path / "settings.py").write_text("""
+from pydantic_settings import BaseSettings
+class Settings(BaseSettings):
+    TOKEN: str
+""")
+    (tmp_path / "worker").mkdir()
+    (tmp_path / "worker" / ".env.example").write_text("TOKEN=example\n")
+    worker = unit("worker")
+    worker.config_requirements = [ConfigRequirement(name="TOKEN", stage="runtime")]
+
+    schema, _ = Analyzer(tmp_path, [unit(), worker], "a" * 64).scan()
+
+    assert len(schema.requirements) == 2
+    assert {
+        (field.scope, field.consumers[0].unit_id, field.case_sensitive, field.necessity)
+        for field in schema.requirements
+    } == {(".", ".", False, "required"), ("worker", "worker", True, "optional")}
+    assert not schema.ambiguities
