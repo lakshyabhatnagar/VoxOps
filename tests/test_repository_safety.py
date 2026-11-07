@@ -51,3 +51,18 @@ def test_empty_repository(tmp_path):
     scan = scan_repository(tmp_path, settings_for(tmp_path))
     assert scan.manifests == []
     assert scan.git.status == "uninitialized"
+
+
+def test_env_fingerprint_uses_names_without_hashing_secret_values(tmp_path):
+    root = copy_fixture(tmp_path, "fastapi_only")
+    settings = settings_for(tmp_path)
+    env = root / ".env"
+    env.write_text("DATABASE_URL=first-private-value\n")
+    first = scan_repository(root, settings)
+    env.write_text("DATABASE_URL=different-private-value\n")
+    changed_value = scan_repository(root, settings)
+    assert first.input_fingerprint == changed_value.input_fingerprint
+
+    env.write_text("DATABASE_URL=different-private-value\nNEW_REQUIRED_NAME=\n")
+    changed_names = scan_repository(root, settings)
+    assert first.input_fingerprint != changed_names.input_fingerprint
