@@ -31,6 +31,8 @@ async def main():
             try:
                 builder = await driver.builder("smoke")
                 image = await driver.build(builder, context, "Dockerfile", session, "smoke")
+                builder_limits = (await driver._inspect("container", builder.id))["HostConfig"]
+                await driver.cleanup([item for item in driver.resources if item.kind != "image"])
                 runtime = await driver.runtime(image.id, "smoke", [], session, "smoke")
                 await driver._run(["wait", runtime.id], 30)
                 result = await driver.logs(runtime)
@@ -38,7 +40,7 @@ async def main():
                 print("builder", builder.id, "image", image.id, "runtime", runtime.id)
                 print(
                     "limits",
-                    (await driver._inspect("container", builder.id))["HostConfig"],
+                    builder_limits,
                     (await driver._inspect("container", runtime.id))["HostConfig"],
                 )
             finally:

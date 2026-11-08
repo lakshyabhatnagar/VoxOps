@@ -119,9 +119,17 @@ class ProbeSpec(Model):
 class UnitExecutionSpec(Model):
     unit_id: str
     strategy: Strategy
+    framework: str = ""
     context_path: str = "."
     root_path: str = "."
     required_paths: list[str] = Field(default_factory=list)
+    selected_paths: list[str] | None = None
+    install_workdir: str = "/workspace"
+    command_workdir: str = "/workspace"
+    toolchain: dict[str, str] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    source_inventory_digest: Digest | None = None
+    port_from_env: bool = False
     dockerfile_path: str | None = None
     builder_image: str | None = None
     install_argv: list[str] = Field(default_factory=list)
@@ -350,6 +358,8 @@ class ExecutionAttempt(Model):
     ended_at: datetime | None = None
     status: Literal["running", "passed", "failed", "blocked", "cancelled", "interrupted"]
     exit_code: int | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+    oom_killed: bool | None = None
     diagnostics: list[ExecutionDiagnostic] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list, max_length=30)
 

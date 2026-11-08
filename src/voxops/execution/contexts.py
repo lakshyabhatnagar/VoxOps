@@ -53,7 +53,7 @@ def freeze_context(
         if not path.startswith(prefix) or any(path.startswith(p) for p in nested_repositories):
             return False
         return selected is None or any(
-            path == item or path.startswith(item + "/") for item in selected
+            PurePosixPath(path).is_relative_to(PurePosixPath(item)) for item in selected
         )
 
     paths = sorted(path for path in before if included(path))

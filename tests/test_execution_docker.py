@@ -113,6 +113,84 @@ def test_output_redacts_split_secrets_and_drops_oversize_line(tmp_path, monkeypa
     asyncio.run(run())
 
 
+def test_bounded_log_retains_recent_failure(tmp_path, monkeypatch):
+    executable = tmp_path / "docker"
+    executable.write_text(
+        '#!/usr/bin/python3\nprint("installing dependency\\n" * 1000)\n'
+        'print("failure: fixture-password")\n'
+    )
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+
+    async def run():
+        driver = DockerDriver(
+            Settings(execution_log_max_bytes=1024, execution_log_max_lines=10),
+            "run",
+            "owner",
+            lambda _: None,
+            asyncio.Event(),
+            lambda text: text.replace("fixture-password", "[REDACTED]"),
+        )
+        result = await driver.command(["docker"])
+        assert result.output.endswith("failure: [REDACTED]\n")
+        assert len(result.output.encode()) <= 1024
+        assert len(result.output.splitlines()) <= 10
+        assert "fixture-password" not in result.output
+
+    asyncio.run(run())
+
+
+def test_timeout_preserves_redacted_diagnostic():
+    async def run():
+        driver = DockerDriver(
+            Settings(), "run", "owner", lambda _: None, asyncio.Event(), lambda text: text
+        )
+
+        async def command(*args, **kwargs):
+            return CommandOutcome(None, "last build step: downloading layer\n", 1, timed_out=True)
+
+        driver.command = command
+        with pytest.raises(AppError) as error:
+            await driver._run(["exec", "fixture", "build"])
+        assert error.value.category == "TIMEOUT"
+        assert "downloading layer" in error.value.message
+
+    asyncio.run(run())
+
+
+def test_runtime_admission_deadline_includes_docker_preflight(tmp_path, monkeypatch):
+    executable = tmp_path / "docker"
+    executable.write_text(
+        "#!/usr/bin/python3\nimport json, sys, time\n"
+        'if sys.argv[1] == "info":\n'
+        "    time.sleep(2)\n"
+        '    print(json.dumps({"NCPU": 8, "MemTotal": 8 * 1024**3, "CgroupVersion": "2"}))\n'
+        'else:\n    print("29.test")\n'
+    )
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+
+    async def run():
+        driver = DockerDriver(
+            Settings(startup_timeout_seconds=1),
+            "run",
+            "owner",
+            lambda _: None,
+            asyncio.Event(),
+            lambda text: text,
+        )
+        try:
+            with pytest.raises(AppError) as error:
+                await driver._acquire_slot("runtime")
+            assert error.value.category == "TIMEOUT"
+            assert not driver._slot
+            assert not driver.resources
+        finally:
+            await driver.cleanup()
+
+    asyncio.run(run())
+
+
 def test_refuses_foreign_resource_cleanup():
     async def run():
         driver = DockerDriver(
@@ -230,6 +308,8 @@ class SimulatedDocker(DockerDriver):
             item = next(
                 (r for r in self.resources if r.name == name or r.resource_id == name), None
             )
+            if item is not None and item.name in self.removed:
+                return CommandOutcome(1, "No such resource", 0)
             if args[1] == "image" and item is None:
                 data = {"Id": "sha256:stock", "Config": {"Volumes": self.image_volumes}}
             elif item is None or item.name in self.removed:
@@ -246,6 +326,25 @@ class SimulatedDocker(DockerDriver):
                     "Id": resource_id,
                     "Image": "sha256:stock",
                     "Config": {"Labels": self._labels(item.task_id)},
+                    "State": {"Running": True, "ExitCode": 0, "OOMKilled": False},
+                    "Mounts": [
+                        {
+                            "Type": "volume",
+                            "Name": arg.split("src=")[1].split(",")[0],
+                            "Destination": arg.split("dst=")[1].split(",")[0],
+                        }
+                        for arg in create
+                        if arg.startswith("type=volume,")
+                    ],
+                    "NetworkSettings": {
+                        "Ports": {
+                            f"{create[create.index('-p') + 1].rsplit(':', 1)[1]}/tcp": [
+                                {"HostIp": "127.0.0.1", "HostPort": "12345"}
+                            ]
+                        }
+                    }
+                    if "-p" in create
+                    else {"Ports": {}},
                     "HostConfig": {
                         "Privileged": False,
                         "Memory": int(next(a[9:-1] for a in create if a.startswith("--memory=")))
@@ -261,7 +360,13 @@ class SimulatedDocker(DockerDriver):
             output = json.dumps(data)
         elif args[1] == "rm" or args[1:3] in (["volume", "rm"], ["image", "rm"]):
             self.removed.extend(
-                r.name for r in self.resources if args[-1] in {r.name, r.resource_id}
+                r.name
+                for r in self.resources
+                if (
+                    args[-1] in {r.name, r.resource_id}
+                    or (r.name in self.created and self.created[r.name][0] == args[-1])
+                    or (r.kind == "image" and args[-1] == "sha256:built")
+                )
             )
         elif args[1] == "exec" and args[-1] == "--version":
             output = "buildctl test"
@@ -384,6 +489,7 @@ def test_cleanup_retains_uncertain_create_for_later_reconciliation_and_releases_
         )
         await driver.cleanup()
         assert item.state == "removed"
+        assert not driver._slot
         assert any(args[1:] == ["rm", "-f", late_id] for args, _ in driver.events)
 
     asyncio.run(run())
@@ -520,7 +626,8 @@ def test_runtime_and_workspace_build_use_separate_private_scoped_env_files(tmp_p
 
         driver.command = capture
         try:
-            await driver.workspace_builder("node", "build", session, "unit", context)
+            builder = await driver.workspace_builder("node", "build", session, "unit", context)
+            await driver.cleanup([r for r in driver.resources if r.resource_id == builder.id])
             await driver.runtime("node", "runtime", ["sleep", "20"], session, "unit")
             assert [content for _, content, _ in files] == [
                 "PUBLIC=client-config\n",
