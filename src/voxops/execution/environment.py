@@ -1,6 +1,7 @@
 """Volatile environment values and their private injection boundary."""
 
 import contextlib
+import json
 import os
 import re
 import stat
@@ -192,7 +193,16 @@ class SecretSession:
             self.generation = uuid4().hex
 
     def redact(self, text: str) -> str:
-        for value in sorted(self._redactions, key=len, reverse=True):
+        values = set(self._redactions)
+        for value in self._redactions:
+            # Docker drains complete lines, while structured diagnostics JSON-escape values.
+            values.update(value.splitlines())
+            values.update(
+                json.dumps(part, ensure_ascii=ascii_only)[1:-1]
+                for part in (value, *value.splitlines())
+                for ascii_only in (True, False)
+            )
+        for value in sorted(values, key=len, reverse=True):
             if value:
                 text = text.replace(value, "[REDACTED]")
         text = re.sub(
