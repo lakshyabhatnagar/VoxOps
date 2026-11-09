@@ -422,14 +422,16 @@ class EnvironmentManager:
             if schema_digest(fresh) != schema_digest(schema):
                 raise AppError("env_form_stale", "Environment schema changed; prepare again.", 409)
             local, versions = self._local_values(schema, source_root)
-            session = SecretSession(schema, defaults=defaults)
+            self._reject_public_leaks(schema, defaults | local, defaults.keys() - local.keys())
+            session = SecretSession(schema, local, defaults)
             session._redactions.update(
                 _private_values(schema, known_defaults, known_defaults.keys())
             )
             session._redactions.update(extra_defaults)
-            session._redactions.update(_private_values(schema, local))
             for item in schema.requirements:
-                if item.field_id in defaults or item.default_kind == "none":
+                if item.field_id in local:
+                    item.resolution = "existing_env"
+                elif item.field_id in defaults or item.default_kind == "none":
                     item.resolution = "default"
             self._sessions[run.run_id] = (
                 execution.execution_id,

@@ -43,7 +43,7 @@ def test_transient_limit_when_recorded_toolchain_cannot_be_rechecked(tmp_path):
         state["offline"] = True
         for _ in range(10):
             outcome = await ExecutionRunner(settings, lambda _: OutageDocker()).run(
-                outcome.plan, contexts, session, previous=outcome
+                outcome.plan, contexts, session, previous=outcome, retry_failed=False
             )
         assert len(outcome.attempts) <= 2
 

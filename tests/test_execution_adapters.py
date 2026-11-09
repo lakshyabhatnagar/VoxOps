@@ -662,3 +662,110 @@ def test_cross_unit_dag_waits_and_blocks_failed_prerequisite(tmp_path):
     finally:
         for context in contexts.values():
             remove_context(context)
+
+
+@pytest.mark.parametrize("failure", ["before_toolchain", "build", "external_service"])
+def test_explicit_retry_rechecks_failed_and_incomplete_results(tmp_path, monkeypatch, failure):
+    """Retry the same inputs after a failed check, then after recovery.
+
+    Each call represents one explicit request to verify again.
+    Keep old attempts and clean up resources from every new execution.
+    """
+    from voxops.execution.readiness import HTTPObservation
+
+    external = failure == "external_service"
+    root, _, artifact = fixture_plan(
+        tmp_path,
+        "fastapi_only" if external else "vite_only",
+        {"fastapi": "container"} if external else {"react_vite": "static"},
+    )
+    container_files(root, artifact)
+    settings = settings_for(tmp_path)
+    plan = build_execution_plan(root, artifact, settings)
+    contexts = freeze_plan_contexts(root, plan, settings)
+    unit_id = artifact.units[0].id
+    drivers = []
+    broken = True
+
+    class RecoveringDocker(AdapterDocker):
+        async def workspace_builder(self, *args, **kwargs):
+            if broken and failure == "before_toolchain":
+                raise AppError("BUILD_FAILED", "Builder could not start.", 409)
+            return await super().workspace_builder(*args, **kwargs)
+
+        async def exec(self, runtime, argv, timeout, **kwargs):
+            if broken and failure == "build" and argv == plan.units[unit_id].build_argv:
+                return CommandOutcome(1, "Production build failed", 0)
+            return await super().exec(runtime, argv, timeout, **kwargs)
+
+        async def runtime(self, *args, **kwargs):
+            if broken and external:
+                raise AppError("UNKNOWN_RUNTIME_FAILURE", "DATABASE_URL connection refused", 409)
+            return await super().runtime(*args, **kwargs)
+
+    def factory(_):
+        driver = RecoveringDocker()
+        drivers.append(driver)
+        return driver
+
+    async def probe(*args, **kwargs):
+        return HTTPObservation(200, 0, ("Local readiness response",))
+
+    monkeypatch.setattr("voxops.execution.runner.probe_http", probe)
+    schema = EnvFormSchema(source_digest="0" * 64)
+    if external:
+        schema.requirements = [
+            EnvRequirement(
+                field_id="db",
+                name="DATABASE_URL",
+                necessity="required",
+                resolution="supplied",
+                consumers=[EnvConsumer(unit_id=unit_id, phase="runtime")],
+            )
+        ]
+    session = SecretSession(schema, {"db": "postgresql://fixture.invalid/db"} if external else {})
+
+    async def exercise():
+        nonlocal broken
+        runner = ExecutionRunner(settings, factory)
+        first = await runner.run(
+            plan, contexts, session, config_generations=session.unit_generations
+        )
+        expected = "verification_incomplete" if external else "failed"
+        assert first.units[unit_id].status == expected
+        second = await runner.run(
+            plan,
+            contexts,
+            session,
+            config_generations=session.unit_generations,
+            previous=first,
+        )
+        assert second.units[unit_id].status == expected
+        first_task = f"{unit_id}:startup" if external else f"{unit_id}:build"
+        assert [a.attempt_number for a in second.attempts if a.task_id == first_task] == [1, 2]
+        broken = False
+        third = await runner.run(
+            plan,
+            contexts,
+            session,
+            config_generations=session.unit_generations,
+            previous=second,
+        )
+        assert third.units[unit_id].status == "passed"
+        assert [a.attempt_number for a in third.attempts if a.task_id == first_task] == [1, 2, 3]
+        cached = await runner.run(
+            plan,
+            contexts,
+            session,
+            config_generations=session.unit_generations,
+            previous=third,
+        )
+        assert cached.attempts == third.attempts
+        assert not drivers[-1].created
+        assert all(r.state == "removed" for d in drivers for r in d.resources)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        for context in contexts.values():
+            remove_context(context)

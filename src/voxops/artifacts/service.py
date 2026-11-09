@@ -390,6 +390,12 @@ class ArtifactService:
         with self.store.project_lock(previous.repo_fingerprint):
             run = self.store.load_run(run_id)
             self._idle(run)
+            if (
+                run.status in {"awaiting_review", "approved"}
+                and run.execution
+                and run.execution.status == "verification_incomplete"
+            ):
+                self.environment._invalidate(run)
             if run.status in {"awaiting_review", "approved", "ready_for_deployment", "rejected"}:
                 return run
             if run.execution is None:
@@ -567,6 +573,7 @@ class ArtifactService:
     async def _verify(self, run_id, epoch, destination, cancel):
         initial = self.store.load_run(run_id)
         project = initial.repo_fingerprint
+        retry_failed = True
         while True:
             with self.store.project_lock(project):
                 run = self._claimed(run_id, epoch)
@@ -652,6 +659,7 @@ class ArtifactService:
                     session,
                     config_generations=execution.config_generations,
                     previous=previous,
+                    retry_failed=retry_failed,
                     on_prepared=prepared,
                     on_attempt=attempt,
                     on_unit=unit,
@@ -659,6 +667,7 @@ class ArtifactService:
             finally:
                 for context in contexts.values():
                     remove_context(context)
+            retry_failed = False
             if cancel.is_set():
                 raise AppError("CANCELLED", "Execution was cancelled.", 409)
             with self.store.project_lock(project):

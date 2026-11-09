@@ -72,7 +72,10 @@ const mode = import.meta.env.MODE;
     assert schema.ambiguities
 
 
-def test_local_values_change_invalidates_and_session_loss_recovers_default_redaction(tmp_path):
+@pytest.mark.parametrize("session_loss", ["clear", "restart"])
+def test_local_values_change_invalidates_and_session_loss_recovers_default_redaction(
+    tmp_path, session_loss
+):
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     source = tmp_path / "source"
@@ -83,6 +86,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env')
     TOKEN: str
     SECRET: str = 'private-default-value'
+    USER_TOKEN: str
 """)
     (source / ".env").write_text("token=local-secret-one\n")
     execution = SimpleNamespace(
@@ -111,9 +115,29 @@ class Settings(BaseSettings):
     assert again["schema"].scan_id == first["schema"].scan_id
     assert manager.session(run).generation != generation
     assert "local-secret-one" not in manager.session(run).redact("local-secret-one")
-    manager.clear(run.run_id)
-    restored = manager.form(run, source, candidate)
-    assert fields["TOKEN"].resolution == "missing"
+    manager.submit(
+        run,
+        source,
+        candidate,
+        again["schema_digest"],
+        {fields["USER_TOKEN"].field_id: "temporary-user-secret"},
+    )
+    assert manager.session(run).contains(fields["USER_TOKEN"].field_id)
+    if session_loss == "clear":
+        manager.clear(run.run_id)
+    else:
+        execution.env_schema = EnvFormSchema.model_validate_json(
+            execution.env_schema.model_dump_json()
+        )
+        manager = EnvironmentManager()
+    restored = manager.prepare(run, candidate, source)
+    restored_fields = {item.name: item for item in restored["schema"].requirements}
+    assert restored_fields["TOKEN"].resolution == "existing_env"
+    assert restored_fields["USER_TOKEN"].resolution == "missing"
+    session = manager.session(run)
+    assert session.values_for(".", "runtime", "secret") == {"TOKEN": "local-secret-two"}
+    assert not session.contains(fields["USER_TOKEN"].field_id)
+    assert "temporary-user-secret" not in restored["schema"].model_dump_json()
     assert restored["schema_digest"] == first["schema_digest"]
     assert "private-default-value" not in manager.session(run).redact("private-default-value")
 
@@ -280,3 +304,29 @@ class Settings(BaseSettings):
         for field in schema.requirements
     } == {(".", ".", False, "required"), ("worker", "worker", True, "optional")}
     assert not schema.ambiguities
+
+
+def test_startup_factory_read_is_found_but_requiredness_is_not_inferred(tmp_path, monkeypatch):
+    """Show the limit of scanning a read inside a function.
+
+    Calling this factory needs the token, but scanning does not follow calls.
+    Keep that limitation visible without treating every function as startup code.
+    """
+    source = """import os
+from fastapi import FastAPI
+
+def create_app():
+    app = FastAPI()
+    app.state.token = os.environ['STARTUP_TOKEN']
+    return app
+"""
+    (tmp_path / "main.py").write_text(source)
+    schema, _ = Analyzer(tmp_path, [unit()], "a" * 64).scan()
+    field = next(item for item in schema.requirements if item.name == "STARTUP_TOKEN")
+    assert field.necessity == "optional"
+    assert [(c.unit_id, c.phase) for c in field.consumers] == [(".", "runtime")]
+    monkeypatch.delenv("STARTUP_TOKEN", raising=False)
+    namespace = {}
+    exec(compile(source, "main.py", "exec"), namespace)
+    with pytest.raises(KeyError, match="STARTUP_TOKEN"):
+        namespace["create_app"]()

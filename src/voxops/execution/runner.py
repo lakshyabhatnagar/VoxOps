@@ -59,7 +59,14 @@ class ExecutionRunner:
         on_unit: Callable | None = None,
         attempt_numbers: Mapping[str, int] | None = None,
         previous: ExecutionOutcome | None = None,
+        retry_failed: bool = True,
     ) -> ExecutionOutcome:
+        """Run verification again when the caller explicitly requests it.
+
+        Reuse successful checks only when their inputs and toolchain still match.
+        Automatic repair continuation passes retry_failed=False to retain retry limits.
+        Keep the old attempts so a retry never resets their numbering or history.
+        """
         if set(contexts) != plan.units.keys():
             raise AppError(
                 "INVALID_ARTIFACT", "Frozen contexts must cover exactly the planned units.", 409
@@ -140,7 +147,12 @@ class ExecutionRunner:
                         for item in failed[0].diagnostics
                     )
 
-                if previous and unit_id in previous.units and unit_id in previous.plan.units:
+                if (
+                    previous
+                    and unit_id in previous.units
+                    and unit_id in previous.plan.units
+                    and (previous.units[unit_id].status == "passed" or not retry_failed)
+                ):
                     spec, prior_spec = prepared.units[unit_id], previous.plan.units[unit_id]
                     prior = previous.units[unit_id]
                     if (

@@ -1,6 +1,7 @@
 import asyncio
 from uuid import uuid4
 
+import pytest
 from conftest import copy_fixture, settings_for
 from demo_stage2 import demo_app
 from fastapi.testclient import TestClient
@@ -141,7 +142,8 @@ def test_api_environment_verification_review_and_local_push(tmp_path):
         )
 
 
-def test_external_service_incomplete_requires_acknowledgement(tmp_path):
+@pytest.mark.parametrize("retry", [False, True])
+def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
     app, source, bare = demo_app(tmp_path, bootstrap=True)
     (source / "main.py").write_text(
         "import os\nfrom fastapi import FastAPI\n"
@@ -206,6 +208,21 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path):
         assert result["execution"]["status"] == "verification_incomplete", result["execution"][
             "units"
         ]
+        if retry:
+            drivers = []
+
+            def recovered_driver(unit, journal, cancel, session):
+                driver = DemoDocker(service.settings, journal, cancel, session)
+                drivers.append(driver)
+                return driver
+
+            service.driver_factory = recovered_driver
+            retried = client.post(prefix + "/execute")
+            assert retried.status_code == 200, retried.text
+            assert retried.json()["execution"]["status"] == "passed"
+            assert drivers
+            assert all(r.state == "removed" for d in drivers for r in d.resources)
+            return
         review = client.get(prefix + "/review").json()["review"]
         approval = {
             "review_id": review["review_id"],

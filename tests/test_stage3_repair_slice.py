@@ -267,10 +267,10 @@ def test_transient_retry_survives_new_runner_instance(tmp_path, category, allowe
             plan, contexts, session
         )
         second = await ExecutionRunner(settings, lambda _: TransientDocker()).run(
-            plan, contexts, session, previous=first
+            plan, contexts, session, previous=first, retry_failed=False
         )
         third = await ExecutionRunner(settings, lambda _: TransientDocker()).run(
-            plan, contexts, session, previous=second
+            plan, contexts, session, previous=second, retry_failed=False
         )
         assert len(calls) == allowed
         assert len(first.attempts) == 1
