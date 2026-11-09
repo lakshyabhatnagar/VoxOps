@@ -20,7 +20,7 @@ function noop() {}
 function element(id) {
   if (!elements.has(id)) elements.set(id, {
     value: '', textContent: '', dataset: {}, reportValidity: valid,
-    focus: noop, replaceChildren: noop, append: noop,
+    focus: noop, replaceChildren: noop, append: noop, addEventListener: noop,
   });
   return elements.get(id);
 }
@@ -64,6 +64,9 @@ const context = vm.createContext({
 });
 vm.runInContext(page.split('<script>')[1].split('</script>')[0], context);
 element('path').value = '/workspace/example';
+buttons.push(element('env-continue'));
+context.updateEnvironmentValidity();
+assert.equal(element('env-continue').disabled, true);
 
 // Submits a pretend form through the real page handler.
 // Checks that the page restores its buttons after the request finishes.
@@ -71,6 +74,7 @@ async function submit(action, fields = [], operation = '') {
   await context.submit({target: new Form(action, fields), submitter: {value: operation},
     preventDefault: noop});
   assert.equal(buttons[0].disabled, false);
+  assert.equal(element('env-continue').disabled, true);
   return requests.at(-1);
 }
 

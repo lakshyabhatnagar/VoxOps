@@ -4,6 +4,12 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from voxops.domain.execution_models import (
+    ExecutionAttestation,
+    ExecutionPlan,
+    ExecutionRun,
+    IncompleteAcknowledgement,
+)
 from voxops.domain.models import AIUsage, DeployableUnit, Model
 
 Strategy = Literal["container", "static", "native"]
@@ -170,10 +176,16 @@ class ArtifactProposal(Model):
     target_path: str
     artifact_type: ArtifactType
     original_hash: str | None
+    parent_hash: str | None = None
     content_hash: str
     staged_ref: str
     creator: Literal["existing", "llm", "deterministic_patch"]
     validations: list[ValidationResult] = Field(default_factory=list)
+
+
+class RepairIntent(Model):
+    expected_applied_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    feedback: str = Field(min_length=1, max_length=2000)
 
 
 # Holds the current outcome of one file job.
@@ -237,6 +249,8 @@ class ChangeReview(Model):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime
     digest: str = ""
+    execution_attestation: ExecutionAttestation | None = None
+    attestation_digest: str | None = None
 
 
 # Records a person's approval or rejection of one review.
@@ -248,6 +262,7 @@ class ApprovalRecord(Model):
     run_id: str
     digest: str
     decision: Literal["approve", "reject"]
+    incomplete_acknowledgement: IncompleteAcknowledgement | None = None
     decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -277,11 +292,20 @@ class GitPublishResult(Model):
     review_id: str
     status: Literal["ready_for_deployment"] = "ready_for_deployment"
     deployment_executed: Literal[False] = False
+    verification_status: Literal["passed", "verification_incomplete"] | None = None
+    execution_attestation: ExecutionAttestation | None = None
+    execution_plan: ExecutionPlan | None = None
     published_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Holds the plan and progress for one run that prepares project files.
 # Tracks file jobs, reviews, approvals, publication progress, errors, and AI usage.
+class OperationClaim(Model):
+    epoch: str
+    owner_process: str
+    kind: Literal["execute", "repair"]
+
+
 class ArtifactRun(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
@@ -310,7 +334,11 @@ class ArtifactRun(Model):
         "cancelled",
         "blocked",
     ] = "planning"
+    execution: ExecutionRun | None = None
+    operation: OperationClaim | None = None
     tasks: dict[str, TaskResult] = Field(default_factory=dict)
+    applied_hashes: dict[str, str] = Field(default_factory=dict)
+    applied_parents: dict[str, str | None] = Field(default_factory=dict)
     reviews: dict[str, ChangeReview] = Field(default_factory=dict)
     approvals: dict[str, ApprovalRecord] = Field(default_factory=dict)
     progress: PublicationProgress = Field(default_factory=PublicationProgress)

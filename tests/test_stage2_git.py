@@ -119,10 +119,16 @@ def scenario(tmp_path: Path, committed: bool = True, remote: bool = True):
     bare.mkdir()
     git(bare, "init", "--bare", "--initial-branch=main")
     if committed:
+        (source / "package.json").write_text(json.dumps({
+            "name": "publication-fixture", "private": True,
+            "dependencies": {"react": "19.1.0", "vite": "5.4.21"},
+            "scripts": {"build": "vite build"},
+        }))
+        (source / "index.html").write_text("<html><body>Publication fixture</body></html>")
         git(source, "init", "--initial-branch=main")
         git(source, "config", "user.name", "Fixture")
         git(source, "config", "user.email", "fixture@example.test")
-        git(source, "add", "app.py")
+        git(source, "add", "app.py", "package.json", "index.html")
         git(source, "commit", "-m", "baseline")
         git(source, "push", str(bare), "main")
     if remote:
@@ -136,6 +142,10 @@ def scenario(tmp_path: Path, committed: bool = True, remote: bool = True):
     publisher = GitPublisher(settings, store, manager, connection, executor)
     run_id = uuid4().hex
     source_hash, _ = capture_source(source)
+    from voxops.frameworks.registry import detect_units
+    from voxops.repository.filesystem_scanner import scan_repository
+
+    units = detect_units(scan_repository(source, settings, uuid4().hex)) if committed else []
     task = ArtifactTask(
         task_id="ignore",
         artifact_type="dockerignore",
@@ -147,8 +157,8 @@ def scenario(tmp_path: Path, committed: bool = True, remote: bool = True):
         scan_id=uuid4().hex,
         repo_fingerprint=fingerprint(source),
         source_input_fingerprint="scan-input",
-        strategy_by_unit={},
-        units=[],
+        strategy_by_unit={unit.id: "static" for unit in units},
+        units=units,
         tasks={"ignore": task},
     )
     run = ArtifactRun(
@@ -203,6 +213,31 @@ def artifacts(context):
     run.tasks["ignore"] = TaskResult(task_id="ignore", status="passed", proposal=proposal)
     context.publisher.artifact_review(run)
     return location
+
+
+def verify_artifacts(context):
+    from simulated_docker import DemoDocker
+
+    from voxops.artifacts.generator import ArtifactGenerator
+    from voxops.artifacts.service import ArtifactService
+
+    settings = context.publisher.settings
+    scans = ScanStore(settings.data_dir)
+    assert context.run.plan.units
+    context.run.status = "generating"
+    for key in list(context.run.reviews):
+        if context.run.reviews[key].purpose == "artifact_publication":
+            context.run.reviews.pop(key)
+            context.run.approvals.pop(key, None)
+    context.store.save_run(context.run)
+    service = ArtifactService(settings, scans, context.manager,
+                              ArtifactGenerator(settings, context.store), context.publisher)
+    service.driver_factory = (
+        lambda unit_id, journal, cancel, session: DemoDocker(settings, journal, cancel, session)
+    )
+    context.run = asyncio.run(service.execute(context.run.run_id))
+    assert context.run.execution.status == "passed", context.run.errors
+
 
 
 # Approve an initial source review and then change the initial branch.
@@ -270,6 +305,7 @@ def test_a12_a16_existing_source_preserved_and_receipt_exact(tmp_path):
     asyncio.run(ctx.publisher.preflight(ctx.run))
     asyncio.run(ctx.publisher.prepare(ctx.run))
     location = artifacts(ctx)
+    verify_artifacts(ctx)
     approve(ctx.run, "artifact_publication")
     receipt = asyncio.run(ctx.publisher.publish(ctx.run))
     assert receipt.commit_sha == git(ctx.bare, "rev-parse", ctx.run.branch).decode().strip()
@@ -302,6 +338,7 @@ def test_a13_dirty_snapshot_selected_and_omitted(tmp_path):
     approve(ctx.run, "source_snapshot")
     asyncio.run(ctx.publisher.prepare(ctx.run))
     artifacts(ctx)
+    verify_artifacts(ctx)
     approve(ctx.run, "artifact_publication")
     asyncio.run(ctx.publisher.publish(ctx.run))
     assert git(ctx.bare, "show", f"{ctx.run.branch}:app.py") == b"print('dirty')\n"
@@ -363,6 +400,7 @@ def test_a15_retry_after_commit_and_push_is_idempotent(tmp_path):
     asyncio.run(ctx.publisher.preflight(ctx.run))
     asyncio.run(ctx.publisher.prepare(ctx.run))
     location = artifacts(ctx)
+    verify_artifacts(ctx)
     approve(ctx.run, "artifact_publication")
     ctx.executor.fail_push = True
     with pytest.raises(AppError):
@@ -382,6 +420,7 @@ def test_remote_branch_collision_is_not_overwritten(tmp_path):
     asyncio.run(ctx.publisher.preflight(ctx.run))
     asyncio.run(ctx.publisher.prepare(ctx.run))
     artifacts(ctx)
+    verify_artifacts(ctx)
     approve(ctx.run, "artifact_publication")
     baseline = ctx.run.progress.baseline_sha
     git(ctx.bare, "update-ref", f"refs/heads/{ctx.run.branch}", baseline)
@@ -431,6 +470,7 @@ def test_untrusted_git_execution_disabled(tmp_path):
     asyncio.run(ctx.publisher.preflight(ctx.run))
     asyncio.run(ctx.publisher.prepare(ctx.run))
     artifacts(ctx)
+    verify_artifacts(ctx)
     approve(ctx.run, "artifact_publication")
     asyncio.run(ctx.publisher.publish(ctx.run))
     assert not marker.exists()

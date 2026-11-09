@@ -10,6 +10,12 @@ from voxops.domain.artifact_models import (
     ReviewedFile,
     ValidationResult,
 )
+from voxops.domain.execution_models import IncompleteAcknowledgement
+from voxops.execution.candidate import (
+    attestation_digest,
+    execution_policy_fingerprint,
+    validate_acknowledgement,
+)
 from voxops.storage.artifact_store import digest
 
 POLICY_FILES = (
@@ -38,6 +44,7 @@ def policy_fingerprint(settings) -> str:
     return digest(
         {
             "code": POLICY_CODE,
+            "execution": execution_policy_fingerprint(settings),
             "max_file_bytes": settings.max_file_bytes,
             "optional_tools": settings.artifact_optional_tools,
             "github_mcp_url": settings.github_mcp_url,
@@ -91,6 +98,9 @@ def build_review(
             else ["Commit approved files", "Push VoxOps branch", "Verify remote SHA"]
         ),
     )
+    if purpose == "artifact_publication" and run.execution and run.execution.attestation:
+        review.execution_attestation = run.execution.attestation.model_copy(deep=True)
+        review.attestation_digest = attestation_digest(review.execution_attestation)
     review.digest = review_digest(review)
     run.reviews[review.review_id] = review
     return review
@@ -131,16 +141,28 @@ def validate_review(run: ArtifactRun, review: ChangeReview) -> None:
 
 # Records an approval or rejection for the specified review and checksum.
 # Rejects changed reviews and conflicting decisions, and updates the run status.
-def approve_review(run: ArtifactRun, review_id: str, digest: str, decision: str) -> ApprovalRecord:
+def approve_review(
+    run: ArtifactRun,
+    review_id: str,
+    digest: str,
+    decision: str,
+    incomplete_acknowledgement: IncompleteAcknowledgement | None = None,
+) -> ApprovalRecord:
     review = run.reviews.get(review_id)
     if review is None:
         raise AppError("review_not_found", "Unknown change review.", 404)
     validate_review(run, review)
     if digest != review.digest:
         raise AppError("stale_review", "Approval digest does not match this review.", 409)
+    if decision == "approve":
+        validate_acknowledgement(review, incomplete_acknowledgement)
     previous = run.approvals.get(review_id)
     if previous:
-        if previous.digest != digest or previous.decision != decision:
+        if (
+            previous.digest != digest
+            or previous.decision != decision
+            or previous.incomplete_acknowledgement != incomplete_acknowledgement
+        ):
             raise AppError(
                 "approval_conflict", "This review already has a different decision.", 409
             )
@@ -153,6 +175,7 @@ def approve_review(run: ArtifactRun, review_id: str, digest: str, decision: str)
         run_id=run.run_id,
         digest=digest,
         decision=decision,
+        incomplete_acknowledgement=incomplete_acknowledgement,
     )
     run.approvals[review_id] = approval
     if decision == "reject":

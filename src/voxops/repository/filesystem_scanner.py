@@ -265,7 +265,11 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
             continue
         try:
             text = read_bounded(file, settings.max_file_bytes)
-            digest.update(relative.encode() + text.encode())
+            # Secret values must not become persistent, guessable scan/cache fingerprints.
+            fingerprint_text = (
+                "\n".join(key.name for key in config_names(text, env_file=True)) if env else text
+            )
+            digest.update(relative.encode() + fingerprint_text.encode())
             if manifest:
                 summary = read_manifest(relative, text)
                 if summary:

@@ -23,6 +23,21 @@ class Settings(BaseSettings):
     artifact_task_tokens: int = Field(default=20000, ge=1000, le=100000)
     artifact_staged_bytes: int = Field(default=8388608, ge=131072, le=67108864)
     artifact_optional_tools: bool = False
+    execution_max_parallel: int = Field(default=2, ge=1, le=4)
+    build_timeout_seconds: float = Field(default=600, ge=10, le=3600)
+    startup_timeout_seconds: float = Field(default=90, ge=1, le=300)
+    execution_log_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    execution_log_max_lines: int = Field(default=500, ge=10, le=10000)
+    execution_build_cpus: float = Field(default=2, ge=0.25, le=16)
+    execution_build_memory_mb: int = Field(default=3072, ge=256, le=32768)
+    execution_build_pids: int = Field(default=512, ge=32, le=4096)
+    execution_runtime_cpus: float = Field(default=1, ge=0.25, le=8)
+    execution_runtime_memory_mb: int = Field(default=512, ge=128, le=16384)
+    execution_runtime_pids: int = Field(default=128, ge=16, le=2048)
+    execution_probe_timeout_seconds: float = Field(default=5, ge=0.1, le=30)
+    execution_node_image: str = "node:22-bookworm-slim"
+    execution_python_image: str = "python:3.12-slim"
+    execution_buildkit_image: str = "moby/buildkit:rootless"
     github_mcp_url: str | None = None
     github_mcp_token: SecretStr | None = None
     git_credential_helper: str | None = None

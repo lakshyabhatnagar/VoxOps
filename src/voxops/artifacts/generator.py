@@ -20,6 +20,7 @@ from voxops.domain.artifact_models import (
     ArtifactPlan,
     ArtifactProposal,
     ArtifactTask,
+    RepairIntent,
     TaskResult,
     ValidationResult,
 )
@@ -121,7 +122,12 @@ class ArtifactGenerator:
     # Checks a file for secrets and saves its contents privately.
     # Returns its destination, checksums, creator, and check results for later use.
     def proposal(
-        self, task: ArtifactTask, content: str, creator: str, findings: list[ValidationResult]
+        self,
+        task: ArtifactTask,
+        content: str,
+        creator: str,
+        findings: list[ValidationResult],
+        parent_hash: str | None = None,
     ) -> ArtifactProposal:
         data = content.encode()
         check_secret(task.target_path, data)
@@ -131,6 +137,7 @@ class ArtifactGenerator:
             target_path=task.target_path,
             artifact_type=task.artifact_type,
             original_hash=task.existing_hash,
+            parent_hash=parent_hash if parent_hash is not None else task.existing_hash,
             content_hash=key,
             staged_ref=key,
             creator=creator,
@@ -141,24 +148,74 @@ class ArtifactGenerator:
     # Checks proposed replacements for file size, secrets, and rules for the requested file type.
     # Saves attempts and checked file contents privately so they can be reviewed before use.
     async def generate(
-        self, run_id: str, root: Path, task: ArtifactTask, plan: ArtifactPlan, budget: ModelBudget
+        self,
+        run_id: str,
+        root: Path,
+        task: ArtifactTask,
+        plan: ArtifactPlan,
+        budget: ModelBudget,
+        *,
+        repair: RepairIntent | None = None,
     ) -> TaskResult:
         result = self.previous(run_id, task)
-        if result.status in {"passed", "validated_existing", "skipped"}:
+        if repair:
+            run = self.store.load_run(run_id)
+            recorded = run.tasks.get(task.task_id)
+            proposal = recorded.proposal if recorded else None
+            if (
+                run.plan != plan
+                or plan.tasks.get(task.task_id) != task
+                or run.applied_hashes.get(task.task_id) != repair.expected_applied_hash
+                or proposal is None
+                or proposal.task_id != task.task_id
+                or proposal.target_path != task.target_path
+                or proposal.artifact_type != task.artifact_type
+                or proposal.original_hash != task.existing_hash
+                or (
+                    proposal.content_hash != repair.expected_applied_hash
+                    and proposal.parent_hash != repair.expected_applied_hash
+                )
+            ):
+                raise AppError("proposal_conflict", "Repair lacks recorded applied authority.", 409)
+        if repair is None and result.status in {"passed", "validated_existing", "skipped"}:
             return result
         if task.operation == "skip":
             result.status = "skipped"
             return self.persist(run_id, result)
         try:
             original_bytes = safe_read(root, task.target_path, self.settings.max_file_bytes)
-            if (
-                digest(original_bytes) if original_bytes is not None else None
-            ) != task.existing_hash:
+            current_hash = digest(original_bytes) if original_bytes is not None else None
+            if current_hash != (repair.expected_applied_hash if repair else task.existing_hash):
                 raise AppError("source_changed", "Artifact source changed after planning.", 409)
+            if repair:
+                prior = result.proposal
+                if (
+                    prior is None
+                    or prior.task_id != task.task_id
+                    or prior.target_path != task.target_path
+                    or prior.artifact_type != task.artifact_type
+                    or prior.original_hash != task.existing_hash
+                ):
+                    raise AppError("proposal_conflict", "Repair task ownership changed.", 409)
+                if (
+                    result.status == "passed"
+                    and prior.parent_hash == current_hash
+                    and prior.content_hash != current_hash
+                ):
+                    return result
+                if prior.content_hash != current_hash:
+                    raise AppError(
+                        "proposal_conflict", "Repair parent is not the applied proposal.", 409
+                    )
+                check_secret(task.target_path, repair.feedback.encode())
             original = original_bytes.decode() if original_bytes is not None else ""
             if original_bytes is not None:
                 check_secret(task.target_path, original_bytes)
-            if original_bytes is not None and task.artifact_type != "source_patch":
+            if (
+                repair is None
+                and original_bytes is not None
+                and task.artifact_type != "source_patch"
+            ):
                 findings = validate_artifact(
                     task,
                     original,
@@ -221,6 +278,7 @@ class ArtifactGenerator:
                         "repair_feedback": [
                             item.model_dump(mode="json") for item in result.validations
                         ],
+                        "execution_feedback": repair.feedback if repair else None,
                     }
                 )
                 with tracing_context(enabled=False):
@@ -256,7 +314,13 @@ class ArtifactGenerator:
                 result.validations = findings
                 attempt.feedback = findings
                 if self.valid(findings):
-                    result.proposal = self.proposal(task, output.content, "llm", findings)
+                    result.proposal = self.proposal(
+                        task,
+                        output.content,
+                        "llm",
+                        findings,
+                        repair.expected_applied_hash if repair else None,
+                    )
                     result.status, attempt.result = "passed", "passed"
                 else:
                     result.status, attempt.result = "failed", "failed"

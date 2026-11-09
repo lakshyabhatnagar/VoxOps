@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
+from simulated_docker import DemoDocker
 
 from voxops.agents.artifact_agent import INSTRUCTIONS
 from voxops.artifacts.generator import ArtifactGenerator
@@ -207,6 +208,9 @@ def demo_app(directory: Path, fixture: str = "fastapi_only", bootstrap: bool = F
         app.state.worktrees,
         ArtifactGenerator(settings, store, demo_agent()),
         publisher,
+    )
+    app.state.artifacts.driver_factory = (
+        lambda unit_id, journal, cancel, session: DemoDocker(settings, journal, cancel, session)
     )
     return app, source, remote
 

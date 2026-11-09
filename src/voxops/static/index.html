@@ -5,24 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VoxOps API tester</title>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; background: #121212; }
     * { box-sizing: border-box; }
-    body { margin: 0 auto; max-width: 1080px; padding: 28px 20px; color: #e5eaf0; background: #0f141b; font: 15px/1.5 system-ui, sans-serif; }
+    body { margin: 0 auto; max-width: 1080px; padding: 28px 20px; color: #ededed; background: #121212; font: 15px/1.5 system-ui, sans-serif; }
     h1 { font-size: 26px; margin: 0; } h2 { font-size: 18px; margin: 0 0 12px; }
-    p { margin: 8px 0 16px; } .muted, small { color: #a6b2c1; }
+    p { margin: 8px 0 16px; } .muted, small { color: #b3b3b3; }
     a { color: #9bbcff; } a:visited { color: #cfb5ff; }
     main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    section { min-width: 0; background: #18202b; border: 1px solid #354153; border-radius: 8px; padding: 20px; }
+    section { min-width: 0; background: #1e1e1e; border: 1px solid #414141; border-radius: 8px; padding: 20px; }
     .wide { grid-column: 1 / -1; }
     label { display: block; margin: 12px 0 5px; font-weight: 600; }
-    input:not([type=checkbox]), textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #627086; border-radius: 4px; font: inherit; background: #10161f; color: inherit; }
-    input::placeholder, textarea::placeholder { color: #a6b2c1; opacity: 1; }
+    input:not([type=checkbox]), textarea, select { width: 100%; padding: 9px 10px; border: 1px solid #707070; border-radius: 4px; font: inherit; background: #141414; color: inherit; }
+    input::placeholder, textarea::placeholder { color: #b3b3b3; opacity: 1; }
     textarea { resize: vertical; min-height: 75px; }
     .check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
     input[type=checkbox] { width: 17px; height: 17px; accent-color: #9bbcff; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-    button { padding: 9px 13px; border: 1px solid #627086; border-radius: 4px; background: #273345; color: #e5eaf0; font: inherit; cursor: pointer; }
-    button:hover:not(:disabled) { background: #34445b; }
+    button { padding: 9px 13px; border: 1px solid #707070; border-radius: 4px; background: #303030; color: #ededed; font: inherit; cursor: pointer; }
+    button:hover:not(:disabled) { background: #414141; }
     button.primary { background: #2857ba; border-color: #7da5ff; color: #fff; }
     button.primary:hover:not(:disabled) { background: #3265d2; }
     button.danger { color: #ffa6ad; border-color: #b16d77; }
@@ -30,7 +30,7 @@
     :focus-visible { outline: 3px solid #83aaff; outline-offset: 2px; }
     #status { font-weight: 600; } #status[data-error=true] { color: #ffa6ad; }
     #summary { white-space: pre-wrap; overflow-wrap: anywhere; }
-    pre { max-height: 520px; overflow: auto; padding: 14px; background: #10161f; border-radius: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre { max-height: 520px; overflow: auto; padding: 14px; background: #141414; border-radius: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 700px) { main { grid-template-columns: 1fr; } body { padding: 20px 12px; } }
   </style>
 </head>
@@ -77,6 +77,25 @@
           <button type="submit" value="list" formnovalidate>List</button>
           <button type="submit" value="inspect">Inspect</button>
           <button type="submit" value="remove" class="danger">Remove worktree</button>
+        </div>
+      </form>
+    </section>
+    <section class="wide">
+      <h2>Verification environment</h2>
+      <label for="env-run-id">Artifact run ID</label>
+      <input id="env-run-id" maxlength="128" required>
+      <div class="actions"><button id="env-load" type="button">Load environment form</button>
+        <button id="verify-run" type="button">Run or resume verification</button>
+        <button id="verify-status" type="button">Verification status</button>
+        <button id="verify-cancel" type="button">Cancel verification</button>
+        <button id="review-load" type="button">View review</button>
+      </div>
+      <p id="env-status" role="status" aria-live="polite"></p>
+      <form id="env-form" hidden>
+        <div id="env-fields"></div>
+        <div class="actions">
+          <button id="env-continue" class="primary" type="submit" disabled>Continue</button>
+          <button id="env-cancel" type="button">Cancel</button>
         </div>
       </form>
     </section>
@@ -198,8 +217,158 @@
         status.dataset.error = 'true';
       } finally {
         for (const button of buttons) button.disabled = false;
+        updateEnvironmentValidity();
       }
     }
+
+    const envForm = document.getElementById('env-form');
+    const envFields = document.getElementById('env-fields');
+    const envContinue = document.getElementById('env-continue');
+    const envStatus = document.getElementById('env-status');
+    let envSchema = null, envDigest = '', envRunId = '', envInputs = [], envBusy = false;
+
+    function clearEnvironment() {
+      for (const {input} of envInputs) input.value = '';
+      envInputs = [];
+      envSchema = null;
+      envDigest = '';
+      envRunId = '';
+      envFields.replaceChildren();
+      envForm.hidden = true;
+      updateEnvironmentValidity();
+    }
+
+    function updateEnvironmentValidity() {
+      for (const {requirement, input} of envInputs) {
+        let invalid = input.required && !input.value.trim();
+        if (input.value && requirement.value_type === 'port') invalid = !/^[0-9]+$/.test(input.value) || Number(input.value) < 1 || Number(input.value) > 65535;
+        if (input.value && requirement.value_type === 'url') {
+          try { new URL(input.value); } catch { invalid = true; }
+        }
+        input.setCustomValidity(invalid ? 'Enter a valid value.' : '');
+      }
+      envContinue.disabled = envBusy || !envSchema || envSchema.ambiguities.length > 0 ||
+        envSchema.requirements.some(item => item.necessity === 'unknown' || item.resolution === 'ambiguous') ||
+        envInputs.some(({input}) => !input.checkValidity());
+    }
+
+    function renderEnvironment(schema) {
+      envSchema = schema;
+      for (const evidence of schema.ambiguities) {
+        const message = document.createElement('p');
+        message.textContent = `${evidence.path}${evidence.line ? `:${evidence.line}` : ''} · ${evidence.detail}`;
+        envFields.append(message);
+      }
+      const groups = new Map();
+      for (const requirement of schema.requirements) {
+        const group = requirement.consumers.map(consumer => `${consumer.unit_id} / ${consumer.phase}`).join(', ') || 'Unassigned';
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(requirement);
+      }
+      for (const [group, requirements] of groups) {
+        const heading = document.createElement('h3');
+        heading.textContent = group;
+        envFields.append(heading);
+        for (const requirement of requirements) {
+          const label = document.createElement('label');
+          const note = document.createElement('small');
+          label.textContent = requirement.name;
+          note.textContent = `${requirement.necessity} · ${requirement.resolution}${requirement.visibility === 'public' ? ' · Public frontend value: exposed to users' : ''}`;
+          if (requirement.necessity !== 'required' || requirement.resolution !== 'missing') {
+            envFields.append(label, note);
+            continue;
+          }
+          const input = document.createElement('input');
+          input.id = `env-value-${envInputs.length}`;
+          input.type = requirement.visibility === 'public' ? 'text' : 'password';
+          input.autocomplete = 'off';
+          input.maxLength = requirement.max_length;
+          input.required = requirement.necessity === 'required' && requirement.resolution === 'missing';
+          if (requirement.value_type === 'integer') input.pattern = '-?[0-9]+';
+          if (requirement.value_type === 'port') input.pattern = '[0-9]+';
+          if (requirement.value_type === 'url' && requirement.visibility === 'public') input.type = 'url';
+          if (requirement.value_type === 'boolean') input.pattern = '[Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|1|0';
+          label.htmlFor = input.id;
+          input.addEventListener('input', updateEnvironmentValidity);
+          envFields.append(label, input, note);
+          envInputs.push({requirement, input});
+        }
+      }
+      envForm.hidden = false;
+      envStatus.textContent = schema.ambiguities.length || schema.requirements.some(item => item.necessity === 'unknown' || item.resolution === 'ambiguous')
+        ? 'Resolve environment ambiguities before continuing.' : 'Enter missing required values. Configured or defaulted values may be left blank.';
+      updateEnvironmentValidity();
+    }
+
+    document.getElementById('env-load').addEventListener('click', async () => {
+      if (envBusy) return;
+      clearEnvironment();
+      const run = document.getElementById('env-run-id');
+      if (!run.reportValidity()) return;
+      const runId = run.value.trim();
+      if (!runId) return;
+      envBusy = true;
+      updateEnvironmentValidity();
+      envStatus.textContent = 'Loading environment form…';
+      try {
+        const response = await fetch(`/api/v1/artifact-runs/${encodeURIComponent(runId)}/verification/env-form`);
+        const data = await response.json();
+        if (!response.ok) throw new Error();
+        envRunId = runId;
+        envDigest = data.schema_digest;
+        renderEnvironment(data.schema);
+      } catch {
+        envStatus.textContent = 'Could not load the environment form.';
+      } finally {
+        envBusy = false;
+        updateEnvironmentValidity();
+      }
+    });
+
+    envForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      updateEnvironmentValidity();
+      if (envContinue.disabled) return;
+      const values = {};
+      for (const {requirement, input} of envInputs) if (input.value !== '') values[requirement.field_id] = input.value;
+      envBusy = true;
+      updateEnvironmentValidity();
+      envStatus.textContent = 'Submitting environment values…';
+      try {
+        const response = await fetch(`/api/v1/artifact-runs/${encodeURIComponent(envRunId)}/verification/env-values`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({schema_digest: envDigest, values})
+        });
+        if (!response.ok) throw new Error();
+        clearEnvironment();
+        envStatus.textContent = 'Environment values accepted.';
+      } catch {
+        envStatus.textContent = 'Could not submit environment values. Check the values and try again.';
+      } finally {
+        envBusy = false;
+        updateEnvironmentValidity();
+      }
+    });
+    document.getElementById('env-cancel').addEventListener('click', () => {
+      if (envBusy) return;
+      clearEnvironment();
+      envStatus.textContent = 'Environment form cleared.';
+    });
+
+    for (const [id, suffix, method] of [
+      ['verify-run', '/execute', 'POST'], ['verify-status', '/verification', 'GET'],
+      ['verify-cancel', '/verification/cancel', 'POST'], ['review-load', '/review', 'GET']
+    ]) document.getElementById(id).addEventListener('click', async () => {
+      const runId = document.getElementById('env-run-id').value.trim();
+      if (!runId) return;
+      try {
+        const response = await fetch(`/api/v1/artifact-runs/${encodeURIComponent(runId)}${suffix}`, {method});
+        const data = await response.json();
+        document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('status').textContent = `HTTP ${response.status}`;
+      } catch {
+        document.getElementById('status').textContent = 'Request failed.';
+      }
+    });
 
     document.addEventListener('submit', submit);
   </script>

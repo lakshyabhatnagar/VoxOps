@@ -5,6 +5,7 @@ from pydantic import Field
 
 from voxops.core.errors import AppError
 from voxops.domain.artifact_models import ArtifactPlan, ArtifactRun, SourcePatchSpec, Strategy
+from voxops.domain.execution_models import IncompleteAcknowledgement
 from voxops.domain.models import Model
 
 router = APIRouter(prefix="/api/v1/artifact-runs", tags=["Stage 2"])
@@ -40,6 +41,32 @@ class ApprovalRequest(Model):
     review_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     decision: Literal["approve", "reject"]
+    incomplete_acknowledgement: IncompleteAcknowledgement | None = None
+
+
+class EnvValuesRequest(Model):
+    schema_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    values: dict[str, str] = Field(max_length=3000)
+
+
+@router.get("/{run_id}/verification")
+def verification(run_id: str, request: Request):
+    return request.app.state.artifacts.store.load_run(run_id).execution
+
+
+@router.post("/{run_id}/verification/cancel")
+async def cancel_verification(run_id: str, request: Request):
+    return await request.app.state.artifacts.cancel_execution(run_id)
+
+
+@router.get("/{run_id}/verification/env-form")
+def environment_form(run_id: str, request: Request):
+    return request.app.state.artifacts.environment_form(run_id)
+
+
+@router.post("/{run_id}/verification/env-values")
+def submit_environment(run_id: str, body: EnvValuesRequest, request: Request):
+    return request.app.state.artifacts.submit_environment(run_id, body.schema_digest, body.values)
 
 
 @router.post("/plan", response_model=ArtifactPlan)
@@ -99,7 +126,9 @@ def inspect_review(run_id: str, request: Request):
 # Records a decision on the displayed review.
 # Checks the source and review checksum before saving approval or rejection.
 def approve(run_id: str, body: ApprovalRequest, request: Request):
-    return request.app.state.artifacts.approve(run_id, body.review_id, body.digest, body.decision)
+    return request.app.state.artifacts.approve(
+        run_id, body.review_id, body.digest, body.decision, body.incomplete_acknowledgement
+    )
 
 
 @router.post("/{run_id}/publish", response_model=ArtifactRun)
