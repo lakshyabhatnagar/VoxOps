@@ -68,6 +68,7 @@ def test_private_source_defaults_do_not_reach_context_or_publication(tmp_path, s
 @pytest.mark.parametrize(
     "source",
     [
+        'import os\nTOKEN = os.environ["TOKEN"]',
         'const key = import.meta.env.VITE_API_KEY ?? "browser-publishable-key";',
         'const key = process.env.NEXT_PUBLIC_API_KEY || "browser-publishable-key";',
         'const VITE_API_KEY: string = "browser-publishable-key";',

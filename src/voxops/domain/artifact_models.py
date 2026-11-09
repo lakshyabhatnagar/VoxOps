@@ -300,6 +300,12 @@ class GitPublishResult(Model):
 
 # Holds the plan and progress for one run that prepares project files.
 # Tracks file jobs, reviews, approvals, publication progress, errors, and AI usage.
+class OperationClaim(Model):
+    epoch: str
+    owner_process: str
+    kind: Literal["execute", "repair"]
+
+
 class ArtifactRun(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
@@ -329,6 +335,7 @@ class ArtifactRun(Model):
         "blocked",
     ] = "planning"
     execution: ExecutionRun | None = None
+    operation: OperationClaim | None = None
     tasks: dict[str, TaskResult] = Field(default_factory=dict)
     applied_hashes: dict[str, str] = Field(default_factory=dict)
     applied_parents: dict[str, str | None] = Field(default_factory=dict)

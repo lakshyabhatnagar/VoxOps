@@ -685,7 +685,7 @@ class GitPublisher:
 
     # Publishes the reviewed changes to the approved branch.
     # Creates the commit, checks its history and verifies the remote after pushing.
-    async def publish(self, run: ArtifactRun) -> GitPublishResult:
+    async def publish(self, run: ArtifactRun, *, authority=None) -> GitPublishResult:
         source = self.source(run)
         review = require_approval(run, "artifact_publication")
         if set(run.tasks) != set(run.plan.tasks) or any(
@@ -703,6 +703,10 @@ class GitPublisher:
         tree = self.executor.reviewed_tree(destination, review.parent_sha, review.files, self.store)
         self.verify_worktree(run, destination, review, tree)
         require_publishable(run, review, self.executor.tree(destination, tree), self.settings)
+        if authority:
+            authority()
+        elif run.execution and run.execution.config_generations:
+            raise AppError("env_session_lost", "Live environment authority is required.", 409)
         sha = self.executor.commit(
             destination,
             tree,
@@ -731,6 +735,8 @@ class GitPublisher:
         attestation = require_publishable(
             run, review, self.executor.tree(destination, tree), self.settings
         )
+        if authority:
+            authority()
         self.executor.push(destination, run.target.clone_url, run.branch, sha)
         remote_sha = self.executor.remote_sha(destination, run.target.clone_url, run.branch)
         if remote_sha != sha:

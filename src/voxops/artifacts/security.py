@@ -15,7 +15,9 @@ _SECRET = re.compile(
     r"\bBearer[ \t]+[A-Za-z0-9._~-]{16,}|"
     r"\b(?!VITE_|NEXT_PUBLIC_)[A-Za-z0-9_-]*"
     r"(?:api[_-]?key|secret|password|token|credential)[A-Za-z0-9_-]*"
-    r'\s*["\']?\s*[:=]\s*["\']?'
+    r'\s*["\']?\s*[:=]\s*'
+    r"(?!os\.(?:getenv|environ)\b|process\.env\b|import\.meta\.env\b)"
+    r'["\']?'
     r"(?!\$|\{|<|\*|\[|(?:example|placeholder|changeme|none|null|false|true)(?:[\s\"',}]|$))"
     r"[A-Za-z0-9_./+\-=]{8,}",
     re.IGNORECASE,

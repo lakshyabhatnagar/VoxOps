@@ -1,5 +1,8 @@
 # Plan and publish artifacts
 
+This describes the original Stage 2 workflow. The current V1 path adds mandatory local verification
+before final artifact approval and publication. See [Stage 3 usage](stage3-usage.md).
+
 Stage 2 uses a trusted local server. Install dependencies and set paths before starting it. The data directory must be outside the target repository, and every allowed root must already exist.
 
 ```sh

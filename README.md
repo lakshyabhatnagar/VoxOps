@@ -1,5 +1,12 @@
 # VoxOps
 
+Stage 3 verifies the unpublished Stage 2 candidate through local Docker before final approval and
+publication. It includes one required-environment form, bounded repair, and explicit acknowledgement
+of incomplete external-service checks. It does not deploy to the cloud.
+See [usage](docs/stage3-usage.md), [architecture](docs/stage3-architecture.md),
+[environment resolution](docs/stage3-env-resolution.md), [security](docs/stage3-security.md),
+[decisions](docs/stage3-decisions.md), and [verification](docs/stage3-verification.md).
+
 The Python package and CLI are `voxops`; service settings use the `VOXOPS_` prefix.
 Previous development runtime records are preserved unchanged in `.voxops/archive/legacy`.
 
@@ -119,9 +126,11 @@ trusted single-process local tool, not a public server or a security sandbox. Sc
 conservative syntax matching can leave dynamic framework settings unresolved. Local JSON results
 are not durable LangGraph checkpoints or production crash-resume support.
 
-Stage 2 adds artifact planning, bounded generation and validation, review, and GitHub publication.
-The offline acceptance suite and actual loopback HTTP/Git demo pass. Stage 2 does not deploy
-applications. Live GitHub/model calls, image builds and GitHub CI execution remain untested. See [Stage 2 usage](docs/stage2-usage.md),
+Historically, Stage 2 added artifact planning, bounded generation and validation, review, and GitHub publication.
+Its historical acceptance checks covered offline generation and loopback HTTP/Git publication.
+Stage 2 did not perform runtime verification or deploy applications. Current Docker evidence is in
+[Stage 3 verification](docs/stage3-verification.md); live GitHub/model calls and GitHub CI execution
+are not claimed by these local tests. See [Stage 2 usage](docs/stage2-usage.md),
 [architecture](docs/stage2-architecture.md), [decisions](docs/stage2-decisions.md),
 [security](docs/stage2-security.md), and [verification](docs/stage2-verification.md).
 

@@ -56,6 +56,7 @@ class ExecutionRunner:
         config_generations: Mapping[str, str] | None = None,
         on_attempt: Callable | None = None,
         on_prepared: Callable | None = None,
+        on_unit: Callable | None = None,
         attempt_numbers: Mapping[str, int] | None = None,
         previous: ExecutionOutcome | None = None,
     ) -> ExecutionOutcome:
@@ -95,7 +96,7 @@ class ExecutionRunner:
             pending = {key: value - ready for key, value in pending.items() if key not in ready}
         unit_futures = {}
 
-        async def unit_worker(unit_id):
+        async def run_unit(unit_id):
             prerequisites = [await unit_futures[key] for key in sorted(dependencies[unit_id])]
             if any(result.status != "passed" for result in prerequisites):
                 spec = prepared.units[unit_id]
@@ -215,6 +216,11 @@ class ExecutionRunner:
                     notify,
                     driver,
                 )
+
+        async def unit_worker(unit_id):
+            result = await run_unit(unit_id)
+            await notify(on_unit, result.model_copy(deep=True))
+            return result
 
         for unit_id in prepared.units:
             unit_futures[unit_id] = asyncio.create_task(unit_worker(unit_id))

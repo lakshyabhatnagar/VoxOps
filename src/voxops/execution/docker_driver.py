@@ -663,7 +663,6 @@ class DockerDriver:
                     )
         task = builder.task_id
         tag = f"voxops-stage3:{uuid4().hex}"
-        item = await self._intent("image", task, tag)
         verify_context(context)
         build_nonce = uuid4().hex
         internal_context = f"/tmp/context-{build_nonce}"
@@ -732,6 +731,7 @@ class DockerDriver:
                 self.settings.build_timeout_seconds,
                 deadline=deadline,
             )
+            item = await self._intent("image", task, tag)
             await self._run(
                 ["load", "-i", str(archive)], self.settings.build_timeout_seconds, deadline=deadline
             )

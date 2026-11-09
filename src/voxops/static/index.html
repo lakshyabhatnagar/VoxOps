@@ -84,7 +84,12 @@
       <h2>Verification environment</h2>
       <label for="env-run-id">Artifact run ID</label>
       <input id="env-run-id" maxlength="128" required>
-      <div class="actions"><button id="env-load" type="button">Load environment form</button></div>
+      <div class="actions"><button id="env-load" type="button">Load environment form</button>
+        <button id="verify-run" type="button">Run or resume verification</button>
+        <button id="verify-status" type="button">Verification status</button>
+        <button id="verify-cancel" type="button">Cancel verification</button>
+        <button id="review-load" type="button">View review</button>
+      </div>
       <p id="env-status" role="status" aria-live="polite"></p>
       <form id="env-form" hidden>
         <div id="env-fields"></div>
@@ -266,8 +271,14 @@
         envFields.append(heading);
         for (const requirement of requirements) {
           const label = document.createElement('label');
-          const input = document.createElement('input');
           const note = document.createElement('small');
+          label.textContent = requirement.name;
+          note.textContent = `${requirement.necessity} · ${requirement.resolution}${requirement.visibility === 'public' ? ' · Public frontend value: exposed to users' : ''}`;
+          if (requirement.necessity !== 'required' || requirement.resolution !== 'missing') {
+            envFields.append(label, note);
+            continue;
+          }
+          const input = document.createElement('input');
           input.id = `env-value-${envInputs.length}`;
           input.type = requirement.visibility === 'public' ? 'text' : 'password';
           input.autocomplete = 'off';
@@ -278,8 +289,6 @@
           if (requirement.value_type === 'url' && requirement.visibility === 'public') input.type = 'url';
           if (requirement.value_type === 'boolean') input.pattern = '[Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|1|0';
           label.htmlFor = input.id;
-          label.textContent = requirement.name;
-          note.textContent = `${requirement.necessity} · ${requirement.resolution}${requirement.visibility === 'public' ? ' · Public frontend value: exposed to users' : ''}`;
           input.addEventListener('input', updateEnvironmentValidity);
           envFields.append(label, input, note);
           envInputs.push({requirement, input});
@@ -343,6 +352,22 @@
       if (envBusy) return;
       clearEnvironment();
       envStatus.textContent = 'Environment form cleared.';
+    });
+
+    for (const [id, suffix, method] of [
+      ['verify-run', '/execute', 'POST'], ['verify-status', '/verification', 'GET'],
+      ['verify-cancel', '/verification/cancel', 'POST'], ['review-load', '/review', 'GET']
+    ]) document.getElementById(id).addEventListener('click', async () => {
+      const runId = document.getElementById('env-run-id').value.trim();
+      if (!runId) return;
+      try {
+        const response = await fetch(`/api/v1/artifact-runs/${encodeURIComponent(runId)}${suffix}`, {method});
+        const data = await response.json();
+        document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('status').textContent = `HTTP ${response.status}`;
+      } catch {
+        document.getElementById('status').textContent = 'Request failed.';
+      }
     });
 
     document.addEventListener('submit', submit);

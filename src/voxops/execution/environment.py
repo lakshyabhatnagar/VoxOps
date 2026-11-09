@@ -151,6 +151,12 @@ class SecretSession:
             schema, self._defaults | self._values, self._defaults.keys() - self._supplied
         )
         self.generation = uuid4().hex
+        self.unit_generations = {
+            consumer.unit_id: uuid4().hex
+            for item in schema.requirements
+            if item.field_id in self._values
+            for consumer in item.consumers
+        }
 
     def __repr__(self) -> str:
         return "<SecretSession redacted>"
@@ -187,6 +193,11 @@ class SecretSession:
                 "invalid_env_values", "Public values cannot contain private configuration.", 422
             )
         if candidate != self._values or set(values) - self._supplied:
+            changed = {key for key in candidate if candidate.get(key) != self._values.get(key)}
+            for item in self.schema.requirements:
+                if item.field_id in changed:
+                    for consumer in item.consumers:
+                        self.unit_generations[consumer.unit_id] = uuid4().hex
             self._redactions.update(private)
             self._supplied.update(values)
             self._values = candidate
@@ -248,10 +259,21 @@ class EnvironmentManager:
     def __init__(self):
         self._sessions = {}
 
+    def source_digest(self, run, candidate_root: Path):
+        from voxops.repository.snapshot import capture_source
+
+        _, inventory = capture_source(candidate_root, 131072)
+        generated = {
+            task.target_path
+            for task in run.plan.tasks.values()
+            if task.artifact_type != "source_patch"
+        }
+        return digest({key: value for key, value in inventory.items() if key not in generated})
+
     def _scan(self, run, candidate_root: Path):
         from voxops.execution.environment_analysis import Analyzer
 
-        analyzer = Analyzer(candidate_root, run.plan.units, run.execution.identity.source_digest)
+        analyzer = Analyzer(candidate_root, run.plan.units, self.source_digest(run, candidate_root))
         schema, defaults = analyzer.scan()
         known_defaults = dict(defaults)
         for item in schema.requirements:
@@ -360,6 +382,20 @@ class EnvironmentManager:
                     raise
                 session = SecretSession(schema, values, record[2]._defaults)
                 session._redactions.update(record[2]._redactions)
+                changed = {
+                    key
+                    for key in set(values) | set(record[2]._values)
+                    if values.get(key) != record[2]._values.get(key)
+                }
+                affected = {
+                    c.unit_id
+                    for item in schema.requirements
+                    if item.field_id in changed
+                    for c in item.consumers
+                }
+                for unit, generation in record[2].unit_generations.items():
+                    if unit not in affected:
+                        session.unit_generations[unit] = generation
                 self._sessions[run.run_id] = (
                     execution.execution_id,
                     schema_digest(schema),
@@ -448,7 +484,11 @@ class EnvironmentManager:
             for item in run.execution.env_schema.requirements
         ):
             raise AppError("env_unresolved", "Environment configuration is incomplete.", 409)
-        if expected_generation is not None and expected_generation != session.generation:
+        if expected_generation is not None and expected_generation != (
+            session.unit_generations
+            if isinstance(expected_generation, dict)
+            else session.generation
+        ):
             raise AppError("env_session_changed", "Environment configuration changed.", 409)
         return session
 
@@ -460,6 +500,7 @@ class EnvironmentManager:
             or record[:2] != (run.execution.execution_id, schema_digest(run.execution.env_schema))
         ):
             raise AppError("env_session_lost", "Environment values must be supplied again.", 409)
+        record[2].schema = run.execution.env_schema
         return record[2]
 
     @staticmethod

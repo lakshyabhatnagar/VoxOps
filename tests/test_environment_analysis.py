@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     )
     run = SimpleNamespace(
         run_id="run",
-        plan=SimpleNamespace(units=[unit()]),
+        plan=SimpleNamespace(units=[unit()], tasks={}),
         execution=execution,
         reviews={},
         approvals={},

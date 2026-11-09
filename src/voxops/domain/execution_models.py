@@ -433,6 +433,9 @@ class ExecutionRun(Model):
     env_schema: EnvFormSchema
     identity: CandidateIdentity
     attempts: dict[str, list[ExecutionAttempt]] = Field(default_factory=dict)
+    units: dict[str, UnitVerification] = Field(default_factory=dict)
+    previous_plan: ExecutionPlan | None = None
+    config_generations: dict[str, str] = Field(default_factory=dict)
     operator_blockers: list[OperatorExternalBlocker] = Field(default_factory=list)
     resources: list[OwnedResourceIntent] = Field(default_factory=list)
     attestation: ExecutionAttestation | None = None
