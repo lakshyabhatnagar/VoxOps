@@ -36,14 +36,16 @@ from voxops.workflows.stage2_graph import Stage2Graph
 def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
     for key, result in sorted(run.tasks.items()):
         proposal = result.proposal
-        if proposal is None or proposal.creator == "existing":
+        if proposal is None:
             continue
         task = run.plan.tasks[key]
         if (
-            result.status != "passed"
+            result.status not in {"passed", "validated_existing"}
+            or (result.status == "validated_existing" and proposal.creator != "existing")
             or proposal.target_path != task.target_path
             or proposal.task_id != key
             or proposal.original_hash != task.existing_hash
+            or proposal.artifact_type != task.artifact_type
         ):
             raise AppError(
                 "proposal_conflict", "Proposal does not match its planned ownership.", 409
@@ -54,9 +56,24 @@ def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
         check_secret(task.target_path, content)
         current = safe_read(root, task.target_path)
         current_hash = digest(current) if current is not None else None
+        parent = proposal.parent_hash
+        if "parent_hash" not in proposal.model_fields_set:
+            parent = task.existing_hash
+        recorded = run.applied_hashes.get(key, task.existing_hash)
+        replay = (
+            key in run.applied_hashes
+            and recorded == proposal.content_hash
+            and current_hash == proposal.content_hash
+            and key in run.applied_parents
+            and run.applied_parents[key] == parent
+        )
+        if parent != recorded and not replay:
+            raise AppError("proposal_conflict", "Proposal parent is not authorized.", 409)
         if current_hash == proposal.content_hash:
+            run.applied_hashes[key] = proposal.content_hash
+            run.applied_parents[key] = parent
             continue
-        if current_hash != task.existing_hash:
+        if current_hash != recorded:
             raise AppError("worktree_changed", "Artifact destination changed before apply.", 409)
         descriptors = []
         temporary = f".voxops-write-{uuid4().hex}"
@@ -87,6 +104,9 @@ def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
                 file.flush()
                 os.fsync(file.fileno())
             os.rename(temporary, parts[-1], src_dir_fd=directory, dst_dir_fd=directory)
+            os.fsync(directory)
+            run.applied_hashes[key] = proposal.content_hash
+            run.applied_parents[key] = parent
         except OSError:
             raise AppError(
                 "unsafe_destination", "Artifact destination could not be safely written.", 409

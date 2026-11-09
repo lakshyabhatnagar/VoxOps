@@ -176,10 +176,16 @@ class ArtifactProposal(Model):
     target_path: str
     artifact_type: ArtifactType
     original_hash: str | None
+    parent_hash: str | None = None
     content_hash: str
     staged_ref: str
     creator: Literal["existing", "llm", "deterministic_patch"]
     validations: list[ValidationResult] = Field(default_factory=list)
+
+
+class RepairIntent(Model):
+    expected_applied_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    feedback: str = Field(min_length=1, max_length=2000)
 
 
 # Holds the current outcome of one file job.
@@ -324,6 +330,8 @@ class ArtifactRun(Model):
     ] = "planning"
     execution: ExecutionRun | None = None
     tasks: dict[str, TaskResult] = Field(default_factory=dict)
+    applied_hashes: dict[str, str] = Field(default_factory=dict)
+    applied_parents: dict[str, str | None] = Field(default_factory=dict)
     reviews: dict[str, ChangeReview] = Field(default_factory=dict)
     approvals: dict[str, ApprovalRecord] = Field(default_factory=dict)
     progress: PublicationProgress = Field(default_factory=PublicationProgress)

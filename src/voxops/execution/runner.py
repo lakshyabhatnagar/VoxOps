@@ -23,6 +23,7 @@ from voxops.domain.execution_models import (
 )
 from voxops.execution.candidate import execution_policy_fingerprint, unit_input_digest
 from voxops.execution.contexts import FrozenContext, verify_context
+from voxops.execution.diagnostics import external_blocker, mentioned_paths
 from voxops.execution.docker_driver import CommandOutcome, DockerDriver
 from voxops.execution.environment import SecretSession
 from voxops.execution.readiness import observe_process, probe_http
@@ -124,12 +125,25 @@ class ExecutionRunner:
             async with limit:
                 verify_context(contexts[unit_id])
                 driver = None
+
+                def retryable(checksum):
+                    failed = [
+                        item
+                        for item in attempts
+                        if item.unit_id == unit_id
+                        and item.input_digest == checksum
+                        and item.status != "passed"
+                    ]
+                    return len(failed) == 1 and any(
+                        item.category in {"REGISTRY_UNAVAILABLE", "DOCKER_UNAVAILABLE"}
+                        for item in failed[0].diagnostics
+                    )
+
                 if previous and unit_id in previous.units and unit_id in previous.plan.units:
                     spec, prior_spec = prepared.units[unit_id], previous.plan.units[unit_id]
                     prior = previous.units[unit_id]
                     if (
-                        prior.status == "passed"
-                        and prior_spec.toolchain
+                        prior_spec.toolchain
                         and self._environment_error(session, unit_id, generations.get(unit_id))
                         is None
                         and spec.model_dump(exclude={"toolchain"})
@@ -150,8 +164,9 @@ class ExecutionRunner:
                                 "docker_server"
                             )
                         except AppError:
-                            matches = False
-                        if matches:
+                            matches = None
+                        if matches is not False:
+                            # An unavailable daemon does not establish a new toolchain revision.
                             spec.toolchain = dict(prior_spec.toolchain)
                             checksum = self._input_digest(
                                 spec, contexts[unit_id], session, generations.get(unit_id)
@@ -163,7 +178,30 @@ class ExecutionRunner:
                                 await notify(
                                     on_prepared, PreparedUnit(spec.model_copy(deep=True), checksum)
                                 )
-                                return prior.model_copy(deep=True)
+                                if (prior.status == "passed" and matches) or (
+                                    prior.status != "passed" and not retryable(checksum)
+                                ):
+                                    return prior.model_copy(deep=True)
+                    elif (
+                        not prior_spec.toolchain
+                        and spec.model_dump(exclude={"toolchain"})
+                        == prior_spec.model_dump(exclude={"toolchain"})
+                        and self._environment_error(session, unit_id, generations.get(unit_id))
+                        is None
+                    ):
+                        checksum = self._input_digest(
+                            spec, contexts[unit_id], session, generations.get(unit_id)
+                        )
+                        for task in prepared.tasks.values():
+                            if task.unit_id == unit_id:
+                                task.input_digest = checksum
+                        if prior.input_digest == unit_input_digest(
+                            prepared, unit_id
+                        ) and not retryable(checksum):
+                            await notify(
+                                on_prepared, PreparedUnit(spec.model_copy(deep=True), checksum)
+                            )
+                            return prior.model_copy(deep=True)
                 return await self._unit(
                     prepared,
                     unit_id,
@@ -243,8 +281,7 @@ class ExecutionRunner:
             current_operation = operation
             key = f"{unit_id}:{operation}"
             number = numbers.get(key, 0) + 1
-            if number > 8:
-                raise AppError("RESOURCE_LIMIT", "Execution task attempt budget is exhausted.", 409)
+            numbers[key] = number
             active = ExecutionAttempt(
                 attempt_id=uuid4().hex,
                 task_id=key,
@@ -429,6 +466,14 @@ class ExecutionRunner:
                 if isinstance(error, asyncio.CancelledError)
                 else ("TIMEOUT" if isinstance(error, TimeoutError) else error.category)
             )
+            if (
+                category in {"DOCKER_OPERATION_FAILED", "BUILD_FAILED"}
+                and "registry" in str(error).lower()
+                and re.search(
+                    r"connection (?:reset|refused)|econnreset|econnrefused", str(error), re.I
+                )
+            ):
+                category = "REGISTRY_UNAVAILABLE"
             allowed = ExecutionDiagnostic.model_fields["category"].annotation.__args__
             if category not in allowed:
                 category = (
@@ -453,7 +498,7 @@ class ExecutionRunner:
                     else "failed"
                 )
             )
-            if active is None and numbers.get(f"{unit_id}:{current_operation}", 0) < 8:
+            if active is None:
                 await start(current_operation)
             diagnostic = ExecutionDiagnostic(
                 diagnostic_id=uuid4().hex,
@@ -463,7 +508,6 @@ class ExecutionRunner:
                 stage=current_operation,
                 message=redact(str(error) or "Execution was cancelled.")[:2000],
             )
-            diagnostics.append(diagnostic)
             if active:
                 active.status, active.ended_at = status, datetime.now(UTC)
                 active.diagnostics = [diagnostic]
@@ -483,8 +527,28 @@ class ExecutionRunner:
                         )
                     except (AppError, TimeoutError):
                         pass
+                if active.oom_killed:
+                    diagnostic.category = "RESOURCE_LIMIT"
+                    status = active.status = "blocked"
+                diagnostic.paths = mentioned_paths(
+                    [diagnostic.message, *active.evidence], spec.required_paths
+                )
+                diagnostic.evidence = active.evidence[:20]
+                external = external_blocker(
+                    diagnostic, session.schema, [diagnostic.message, *active.evidence]
+                )
+                if (
+                    external
+                    and not active.oom_killed
+                    and "build" in checks
+                    and checks["build"].status == "passed"
+                ):
+                    diagnostic, status = external, "blocked"
+                    active.status = status
+                    active.diagnostics = [diagnostic]
                 attempts.append(active.model_copy(deep=True))
                 await notify(on_attempt, active.model_copy(deep=True))
+            diagnostics.append(diagnostic)
             for kind in LEVEL_CHECKS[spec.required_level]:
                 if kind not in checks:
                     checks[kind] = CheckResult(
@@ -518,12 +582,17 @@ class ExecutionRunner:
         for level, kinds in LEVEL_CHECKS.items():
             if kinds and set(kinds) <= passed:
                 achieved = level
+        external = bool(diagnostics) and all(
+            item.category == "EXTERNAL_SERVICE_UNAVAILABLE" for item in diagnostics
+        )
         status = (
             "passed"
             if set(LEVEL_CHECKS[spec.required_level]) <= passed
             else (
                 "cancelled"
                 if driver.cancel.is_set()
+                else "verification_incomplete"
+                if external
                 else "blocked"
                 if any(result.status == "blocked" for result in checks.values())
                 else "failed"

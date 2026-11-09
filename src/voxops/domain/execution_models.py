@@ -276,6 +276,20 @@ class ExecutionDiagnostic(Model):
         return self
 
 
+class OperatorExternalBlocker(Model):
+    blocker_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    unit_id: str
+    dependency_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    explanation: str = Field(min_length=1, max_length=1000)
+    checks: list[Literal["startup", "http", "health"]] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def distinct_checks(self) -> "OperatorExternalBlocker":
+        if len(set(self.checks)) != len(self.checks):
+            raise ValueError("Operator blocker checks must be distinct")
+        return self
+
+
 class CheckResult(Model):
     check_id: str
     kind: CheckKind
@@ -332,6 +346,8 @@ class UnitVerification(Model):
             raise ValueError("Publishable verification cannot contain failed checks")
         if self.status == "verification_incomplete":
             missing = required - passed
+            if any(item.category != "EXTERNAL_SERVICE_UNAVAILABLE" for item in self.diagnostics):
+                raise ValueError("Incomplete verification cannot waive other failures")
             blockers = {
                 item.diagnostic_id
                 for item in self.diagnostics
@@ -352,8 +368,7 @@ class ExecutionAttempt(Model):
     task_id: str
     unit_id: str
     input_digest: Digest
-    # At most four content revisions, with one transient reattempt each.
-    attempt_number: int = Field(ge=1, le=8)
+    attempt_number: int = Field(ge=1)
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
     status: Literal["running", "passed", "failed", "blocked", "cancelled", "interrupted"]
@@ -418,6 +433,7 @@ class ExecutionRun(Model):
     env_schema: EnvFormSchema
     identity: CandidateIdentity
     attempts: dict[str, list[ExecutionAttempt]] = Field(default_factory=dict)
+    operator_blockers: list[OperatorExternalBlocker] = Field(default_factory=list)
     resources: list[OwnedResourceIntent] = Field(default_factory=list)
     attestation: ExecutionAttestation | None = None
 
@@ -429,9 +445,24 @@ class ExecutionRun(Model):
             raise ValueError("Execution candidate linkage mismatch")
         if self.attestation and self.attestation.identity != self.identity:
             raise ValueError("Execution attestation candidate mismatch")
+        if len({item.blocker_id for item in self.operator_blockers}) != len(self.operator_blockers):
+            raise ValueError("Operator blocker identity must be unique")
+        for blocker in self.operator_blockers:
+            spec = self.plan.units.get(blocker.unit_id)
+            if spec is None or not set(blocker.checks) <= set(LEVEL_CHECKS[spec.required_level]):
+                raise ValueError("Operator blocker must name planned runtime checks")
+            if not any(
+                item.name == blocker.dependency_name
+                and item.resolution in {"existing_env", "supplied", "default"}
+                and any(
+                    c.unit_id == blocker.unit_id and c.phase == "runtime" for c in item.consumers
+                )
+                for item in self.env_schema.requirements
+            ):
+                raise ValueError("Operator blocker must name a configured runtime dependency")
         for task_id, attempts in self.attempts.items():
-            if task_id not in self.plan.tasks or len(attempts) > 8:
-                raise ValueError("Execution attempts must belong to a bounded planned task")
+            if task_id not in self.plan.tasks:
+                raise ValueError("Execution attempts must belong to a planned task")
             task = self.plan.tasks[task_id]
             if any(
                 attempt.task_id != task_id or attempt.unit_id != task.unit_id

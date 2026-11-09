@@ -29,8 +29,14 @@ def execution_policy_fingerprint(settings: Settings) -> str:
             *root.joinpath("execution").rglob("*.py"),
             *root.joinpath("workflows").glob("stage3*.py"),
             root / "domain/execution_models.py",
+            root / "domain/artifact_models.py",
             root / "domain/models.py",
             root / "core/settings.py",
+            root / "artifacts/generator.py",
+            root / "artifacts/context_builder.py",
+            root / "artifacts/security.py",
+            root / "artifacts/validators.py",
+            root / "artifacts/patcher.py",
         }
     )
     return digest(
@@ -230,7 +236,19 @@ def require_publishable(
             for item in execution.env_schema.requirements
             if item.necessity == "required"
             and item.resolution in {"existing_env", "supplied", "default"}
-            and any(consumer.unit_id == key for consumer in item.consumers)
+            and any(
+                consumer.unit_id == key and consumer.phase == "runtime"
+                for consumer in item.consumers
+            )
+        }
+        operator_declared = {
+            item.name
+            for item in execution.env_schema.requirements
+            if item.resolution in {"existing_env", "supplied", "default"}
+            and any(
+                consumer.unit_id == key and consumer.phase == "runtime"
+                for consumer in item.consumers
+            )
         }
         if unit.input_digest != unit_input_digest(execution.plan, key):
             raise AppError("verification_stale", "Unit verification inputs changed.", 409)
@@ -258,7 +276,9 @@ def require_publishable(
                     "verification_stale", "Passing check lacks its current execution attempt.", 409
                 )
         if any(
-            item.category == "EXTERNAL_SERVICE_UNAVAILABLE" and item.dependency_name not in declared
+            item.category == "EXTERNAL_SERVICE_UNAVAILABLE"
+            and item.dependency_name
+            not in (operator_declared if item.external_signal == "operator" else declared)
             for item in unit.diagnostics
         ):
             raise AppError(
@@ -267,6 +287,21 @@ def require_publishable(
         for diagnostic in unit.diagnostics:
             if diagnostic.category != "EXTERNAL_SERVICE_UNAVAILABLE":
                 continue
+            if diagnostic.external_signal == "operator" and not any(
+                blocker.blocker_id == diagnostic.diagnostic_id
+                and blocker.unit_id == key
+                and blocker.dependency_name == diagnostic.dependency_name
+                and set(blocker.checks)
+                == {
+                    kind
+                    for kind in LEVEL_CHECKS[unit.required_level]
+                    if kind not in unit.checks or unit.checks[kind].status != "passed"
+                }
+                for blocker in execution.operator_blockers
+            ):
+                raise AppError(
+                    "verification_stale", "Operator blocker declaration is missing or stale.", 409
+                )
             task = execution.plan.tasks.get(diagnostic.task_id)
             attempts = execution.attempts.get(diagnostic.task_id, [])
             current_attempts = [
