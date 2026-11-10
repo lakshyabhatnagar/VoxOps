@@ -330,3 +330,82 @@ def create_app():
     exec(compile(source, "main.py", "exec"), namespace)
     with pytest.raises(KeyError, match="STARTUP_TOKEN"):
         namespace["create_app"]()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "alias='EXTERNAL_VALUE'",
+        "alias='EXTERNAL_VALUE', validation_alias=None",
+        "alias='OTHER_VALUE', validation_alias='EXTERNAL_VALUE'",
+        "validation_alias='EXTERNAL_VALUE', alias='OTHER_VALUE'",
+    ],
+)
+def test_settings_alias_injection_matches_pydantic(tmp_path, monkeypatch, options):
+    """Use the name that the settings class actually reads.
+
+    A validation alias takes precedence over an ordinary alias.
+    Neither alias receives the configured environment prefix.
+    """
+    source = f"""from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix='APP_')
+    value: str = Field({options})
+"""
+    (tmp_path / "settings.py").write_text(source)
+    schema, _ = Analyzer(tmp_path, [unit()], "a" * 64).scan()
+    assert not schema.ambiguities
+    assert [item.name for item in schema.requirements] == ["EXTERNAL_VALUE"]
+    session = SecretSession(schema)
+    session.submit({schema.requirements[0].field_id: "supplied-value"})
+    for name, value in session.values_for(".", "runtime", "unknown").items():
+        monkeypatch.setenv(name, value)
+    namespace = {}
+    exec(compile(source, "settings.py", "exec"), namespace)
+    assert namespace["Settings"]().value == "supplied-value"
+
+
+def test_dynamic_settings_alias_requires_review(tmp_path):
+    (tmp_path / "settings.py").write_text("""from pydantic_settings import BaseSettings
+from pydantic import Field
+class Settings(BaseSettings):
+    value: str = Field(alias=choose_alias())
+""")
+    schema, _ = Analyzer(tmp_path, [unit()], "a" * 64).scan()
+    assert not schema.requirements
+    assert any(item.detail == "Settings alias is dynamic" for item in schema.ambiguities)
+
+
+@pytest.mark.parametrize("production_exists", [False, True])
+def test_explicit_settings_env_file_excludes_implicit_dotenv(tmp_path, production_exists):
+    """Read only the files explicitly selected by the app.
+
+    A development .env must not override this application's default.
+    A present production file must still supply its configured value.
+    """
+    (
+        tmp_path / "settings.py"
+    ).write_text("""from pydantic_settings import BaseSettings, SettingsConfigDict
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file='.env.production')
+    target: str = 'safe-target'
+""")
+    (tmp_path / ".env").write_text("target=development-target\n")
+    if production_exists:
+        (tmp_path / ".env.production").write_text("target=production-target\n")
+    run = SimpleNamespace(
+        run_id="run",
+        plan=SimpleNamespace(units=[unit()], tasks={}),
+        execution=SimpleNamespace(
+            execution_id="execution", env_schema=EnvFormSchema(source_digest="a" * 64)
+        ),
+    )
+    manager = EnvironmentManager()
+    form = manager.prepare(run, tmp_path, tmp_path)
+    assert form["schema"].env_files["."] == [".env.production"]
+    values = manager.session(run).values_for(".", "runtime", "unknown")
+    assert values == ({"target": "production-target"} if production_exists else {})
+    assert form["schema"].requirements[0].resolution == (
+        "existing_env" if production_exists else "default"
+    )

@@ -319,25 +319,26 @@ class Analyzer:
                     and isinstance(value.func, ast.Name)
                     and value.func.id in field_names
                 ):
-                    for kw in value.keywords:
-                        if kw.arg == "validation_alias":
-                            if isinstance(kw.value, ast.Constant) and isinstance(
-                                kw.value.value, str
-                            ):
-                                alias = kw.value.value
-                            else:
-                                dynamic_alias = True
-                                self.ambiguous(
-                                    path, stmt.lineno, "python", "Settings alias is dynamic"
-                                )
-                        if kw.arg == "default_factory":
-                            self.ambiguous(
-                                path, stmt.lineno, "python", "Settings default factory is dynamic"
-                            )
-                    value = next(
-                        (kw.value for kw in value.keywords if kw.arg == "default"),
-                        value.args[0] if value.args else None,
-                    )
+                    options = {kw.arg: kw.value for kw in value.keywords}
+                    for name in ("validation_alias", "alias"):
+                        alias_value = options.get(name)
+                        if alias_value is None or (
+                            isinstance(alias_value, ast.Constant) and alias_value.value is None
+                        ):
+                            continue
+                        if isinstance(alias_value, ast.Constant) and isinstance(
+                            alias_value.value, str
+                        ):
+                            alias = alias_value.value
+                        else:
+                            dynamic_alias = True
+                            self.ambiguous(path, stmt.lineno, "python", "Settings alias is dynamic")
+                        break
+                    if "default_factory" in options:
+                        self.ambiguous(
+                            path, stmt.lineno, "python", "Settings default factory is dynamic"
+                        )
+                    value = options.get("default", value.args[0] if value.args else None)
                 has_default = isinstance(value, ast.Constant) and value.value is not Ellipsis
                 if value is not None and not isinstance(value, ast.Constant):
                     self.ambiguous(path, stmt.lineno, "python", "Settings default is dynamic")
@@ -562,8 +563,6 @@ class Analyzer:
         count = total = 0
         metadata = []
         for unit in self.units:
-            if unit.language == "python":
-                self.env_files.setdefault(unit.root_path, []).append(".env")
             if unit.framework.value == "react_vite":
                 self.env_files.setdefault(unit.root_path, []).extend(
                     [".env", ".env.local", ".env.production", ".env.production.local"]
@@ -645,6 +644,8 @@ class Analyzer:
                         self.python(unit, path, content)
                     else:
                         self.javascript(unit, path, content)
+            if unit.language == "python":
+                self.env_files.setdefault(unit.root_path, [".env"])
             for item in unit.config_requirements:
                 phase = "build" if item.stage == "build_time" else "runtime"
                 metadata.append(

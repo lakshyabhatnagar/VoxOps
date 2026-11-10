@@ -379,6 +379,25 @@ class ArtifactService:
             self.store.save_run(run)
             return run
 
+    def _record_model_usage(self, run: ArtifactRun) -> None:
+        """Count model requests and tokens from the saved attempts for every task.
+
+        Failed repairs also consume requests, even when their content is rejected.
+        Read their saved attempts without replacing the run's accepted file proposals.
+        """
+        attempts = [
+            attempt
+            for task in run.plan.tasks.values()
+            for attempt in self.generator.previous(run.run_id, task).attempts
+        ]
+        run.model_usage = AIUsage(
+            status="used" if attempts else "skipped",
+            model=self.settings.model,
+            requests=sum(attempt.usage.requests for attempt in attempts),
+            input_tokens=sum(attempt.usage.input_tokens for attempt in attempts),
+            output_tokens=sum(attempt.usage.output_tokens for attempt in attempts),
+        )
+
     async def execute(self, run_id: str) -> ArtifactRun:
         previous = self.store.load_run(run_id)
         if (previous.operation and not self._owner_alive(previous.operation.owner_process)) or (
@@ -441,14 +460,7 @@ class ArtifactService:
                         raise AppError("CANCELLED", "Execution was cancelled.", 409)
                     run.tasks = generated
                     self.store.save_run(run)
-                attempts = [attempt for task in run.tasks.values() for attempt in task.attempts]
-                run.model_usage = AIUsage(
-                    status="used" if attempts else "skipped",
-                    model=self.settings.model,
-                    requests=sum(attempt.usage.requests for attempt in attempts),
-                    input_tokens=sum(attempt.usage.input_tokens for attempt in attempts),
-                    output_tokens=sum(attempt.usage.output_tokens for attempt in attempts),
-                )
+                self._record_model_usage(run)
                 if any(
                     task.status not in {"passed", "validated_existing", "skipped"}
                     for task in run.tasks.values()
@@ -726,11 +738,16 @@ class ArtifactService:
                 )
                 if proposal is not None:
                     break
-            if proposal is None or proposal.status != "passed" or proposal.proposal is None:
+            if proposal is None:
                 run.operation = None
                 return run
             with self.store.project_lock(project):
                 run = self._claimed(run_id, epoch)
+                self._record_model_usage(run)
+                if proposal.status != "passed" or proposal.proposal is None:
+                    self.store.save_run(run)
+                    run.operation = None
+                    return run
                 old_hash = run.applied_hashes[proposal.task_id]
                 if proposal.proposal.content_hash == old_hash:
                     run.tasks[proposal.task_id] = proposal
