@@ -19,6 +19,10 @@ TOKEN = re.compile(
 )
 
 
+# Read a small set of Python type hints without running the source.
+# Recognize integer and boolean fields, including supported optional forms.
+# Use that information to validate form values rather than accepting arbitrary text for every
+# field.
 def _annotation_type(node):
     if isinstance(node, ast.Name):
         return {"int": "integer", "bool": "boolean"}.get(node.id)
@@ -34,6 +38,9 @@ def _annotation_type(node):
     return None
 
 
+# Read a source file beneath the chosen repository root.
+# Open each path component without following links, and limit the file size.
+# The scanner uses this to inspect candidate code without importing or executing it.
 def _read(root: Path, relative: str, limit: int) -> str:
     parts = Path(relative).parts
     if not parts or Path(relative).is_absolute() or any(p in {".", ".."} for p in parts):
@@ -64,18 +71,37 @@ def _read(root: Path, relative: str, limit: int) -> str:
             os.close(fd)
 
 
+# Find environment-variable names by reading Python and JavaScript source text.
+# Collect where each name is used, which app needs it, and any supported literal default.
+# Keep actual defaults separate from the form data that can be saved or shown.
 class Analyzer:
-    def __init__(self, root: Path, units: list[DeployableUnit], source_digest: str):
+    # Remember the repository root, its apps, and the source comparison code.
+    # Start separate collections for fields, defaults, uncertainties, and selected .env files.
+    # These collections are filled as source files are inspected.
+    def __init__(
+        self, root: Path, units: list[DeployableUnit], source_digest: str,
+        *, max_file_bytes: int = 1048576,
+    ):
         self.root, self.units, self.source_digest = root, units, source_digest
+        self.max_file_bytes = max_file_bytes
         self.requirements = {}
         self.defaults = {}
         self.extra_defaults = set()
         self.ambiguities = []
         self.env_files = {}
 
+    # Record a source location whose meaning could not be decided safely.
+    # Save a short reason instead of guessing a configuration name or value.
+    # These unresolved cases stop automatic verification from claiming the configuration is
+    # complete.
     def ambiguous(self, path: str, line: int | None, kind: str, detail: str) -> None:
         self.ambiguities.append(EnvEvidence(path=path, line=line, kind=kind, detail=detail))
 
+    # Add or merge one discovered configuration field.
+    # Keep its source locations, app consumers, type, default information, and requiredness
+    # together.
+    # If two discoveries disagree about defaults, report the conflict rather than picking one
+    # silently.
     def add(
         self,
         unit: DeployableUnit,
@@ -168,6 +194,10 @@ class Analyzer:
         if has_default and default is not None:
             self.defaults[field_id] = str(default)
 
+    # Parse Python into syntax nodes without importing the application.
+    # Read supported settings classes, aliases, prefixes, and direct environment accesses.
+    # Treat reads inside functions conservatively because this scanner does not follow which
+    # functions startup calls.
     def python(self, unit: DeployableUnit, path: str, text: str):
         try:
             tree = ast.parse(text)
@@ -319,25 +349,26 @@ class Analyzer:
                     and isinstance(value.func, ast.Name)
                     and value.func.id in field_names
                 ):
-                    for kw in value.keywords:
-                        if kw.arg == "validation_alias":
-                            if isinstance(kw.value, ast.Constant) and isinstance(
-                                kw.value.value, str
-                            ):
-                                alias = kw.value.value
-                            else:
-                                dynamic_alias = True
-                                self.ambiguous(
-                                    path, stmt.lineno, "python", "Settings alias is dynamic"
-                                )
-                        if kw.arg == "default_factory":
-                            self.ambiguous(
-                                path, stmt.lineno, "python", "Settings default factory is dynamic"
-                            )
-                    value = next(
-                        (kw.value for kw in value.keywords if kw.arg == "default"),
-                        value.args[0] if value.args else None,
-                    )
+                    options = {kw.arg: kw.value for kw in value.keywords}
+                    for name in ("validation_alias", "alias"):
+                        alias_value = options.get(name)
+                        if alias_value is None or (
+                            isinstance(alias_value, ast.Constant) and alias_value.value is None
+                        ):
+                            continue
+                        if isinstance(alias_value, ast.Constant) and isinstance(
+                            alias_value.value, str
+                        ):
+                            alias = alias_value.value
+                        else:
+                            dynamic_alias = True
+                            self.ambiguous(path, stmt.lineno, "python", "Settings alias is dynamic")
+                        break
+                    if "default_factory" in options:
+                        self.ambiguous(
+                            path, stmt.lineno, "python", "Settings default factory is dynamic"
+                        )
+                    value = options.get("default", value.args[0] if value.args else None)
                 has_default = isinstance(value, ast.Constant) and value.value is not Ellipsis
                 if value is not None and not isinstance(value, ast.Constant):
                     self.ambiguous(path, stmt.lineno, "python", "Settings default is dynamic")
@@ -377,11 +408,21 @@ class Analyzer:
                     case_sensitive=case_sensitive,
                 )
 
+        # Walk the Python syntax nodes looking for direct environment reads.
+        # Track whether a read is inside a function or conditional block.
+        # That context helps distinguish an unconditional top-level requirement from a read that
+        # may never run.
         class Visitor(ast.NodeVisitor):
+            # Start outside all functions and conditional blocks.
+            # The two counters increase and decrease while walking nested code.
+            # They affect how confidently a direct environment read can be called required.
             def __init__(self):
                 self.depth = 0
                 self.conditional = 0
 
+            # Increase the function-depth counter while visiting a function body.
+            # Scan the body for names, but do not assume that the application calls the function.
+            # Restore the counter afterward so later top-level reads are handled correctly.
             def visit_FunctionDef(self, node):
                 self.depth += 1
                 self.generic_visit(node)
@@ -389,11 +430,19 @@ class Analyzer:
 
             visit_AsyncFunctionDef = visit_FunctionDef
 
+            # Mark reads inside this if statement as conditional.
+            # Walk both the condition and its contained code using that context.
+            # Restore the counter afterward so optional paths do not change later top-level reads.
             def visit_If(self, node):
                 self.conditional += 1
                 self.generic_visit(node)
                 self.conditional -= 1
 
+            # Find direct indexed reads such as os.environ['TOKEN'].
+            # An unconditional top-level read needs the value immediately; nested reads are marked
+            # optional.
+            # Record supported literal names and report unsupported dynamic top-level names
+            # instead of inventing them.
             def visit_Subscript(self, node):
                 if (
                     isinstance(node.value, ast.Name)
@@ -420,6 +469,10 @@ class Analyzer:
                         )
                 self.generic_visit(node)
 
+            # Find supported getenv and environment.get calls.
+            # Read a literal name and any literal fallback value without running the call.
+            # Report unsupported dynamic names or fallbacks where the scanner cannot determine
+            # their meaning.
             def visit_Call(self, node):
                 func = node.func
                 is_get = (
@@ -477,6 +530,10 @@ class Analyzer:
         self_outer = self
         Visitor().visit(tree)
 
+    # Scan JavaScript and TypeScript environment reads while ignoring comments and ordinary
+    # strings.
+    # Recognize supported defaults, simple missing-value guards, and public frontend prefixes.
+    # Report computed names as uncertain instead of guessing which variable they refer to.
     def javascript(self, unit: DeployableUnit, path: str, text: str):
         tokens = [
             m.group()
@@ -558,12 +615,15 @@ class Analyzer:
                 kind="javascript",
             )
 
+    # Walk each app's relevant source files while excluding private and generated directories.
+    # Combine source discoveries with example-file and Stage 1 name hints without duplicating
+    # fields.
+    # Return a value-free form plus separate defaults, using explicit Python env-file declarations
+    # when present.
     def scan(self):
         count = total = 0
         metadata = []
         for unit in self.units:
-            if unit.language == "python":
-                self.env_files.setdefault(unit.root_path, []).append(".env")
             if unit.framework.value == "react_vite":
                 self.env_files.setdefault(unit.root_path, []).extend(
                     [".env", ".env.local", ".env.production", ".env.production.local"]
@@ -606,7 +666,7 @@ class Analyzer:
                             "env_scan_limit", "Environment scan file limit exceeded.", 409
                         )
                     try:
-                        content = _read(self.root, path, 262144)
+                        content = _read(self.root, path, self.max_file_bytes)
                     except (OSError, ValueError, UnicodeError):
                         self.ambiguous(
                             path,
@@ -645,6 +705,8 @@ class Analyzer:
                         self.python(unit, path, content)
                     else:
                         self.javascript(unit, path, content)
+            if unit.language == "python":
+                self.env_files.setdefault(unit.root_path, [".env"])
             for item in unit.config_requirements:
                 phase = "build" if item.stage == "build_time" else "runtime"
                 metadata.append(

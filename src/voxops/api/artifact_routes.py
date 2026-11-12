@@ -11,8 +11,9 @@ from voxops.domain.models import Model
 router = APIRouter(prefix="/api/v1/artifact-runs", tags=["Stage 2"])
 
 
-# Holds the choices needed to plan generated files.
-# Includes the source directory, per-unit strategies and an optional provider.
+# Describe a request to plan deployment-related files for a repository.
+# Include the path, per-app strategy choices, and explicitly requested source patches.
+# The service validates these choices before any generation run starts.
 class PlanRequest(Model):
     path: str = Field(min_length=1, max_length=4096)
     strategies: dict[str, Strategy] = Field(max_length=32)
@@ -20,8 +21,9 @@ class PlanRequest(Model):
     patches: list[SourcePatchSpec] = Field(default_factory=list, max_length=8)
 
 
-# Holds the information needed to start a saved plan.
-# Includes the selected source and repository details for the run.
+# Describe a request to start a previously saved plan.
+# Include the target GitHub owner and repository plus selected source paths.
+# The saved plan ID keeps this request tied to the choices already made during planning.
 class RunRequest(Model):
     plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     owner: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
@@ -29,14 +31,16 @@ class RunRequest(Model):
     selected_paths: list[str] | None = Field(default=None, max_length=3000)
 
 
-# Holds the exact source files selected for review.
-# An empty list records the choice to omit all files.
+# Hold the exact paths selected for the run's source review.
+# An empty list means the user chose to omit all such paths.
+# The service checks when this selection may still be changed.
 class SourceSelection(Model):
     paths: list[str] = Field(max_length=3000)
 
 
-# Holds a decision about a particular review.
-# Includes the review ID and displayed checksum so the decision refers to those contents.
+# Carry the user's decision for one exact review.
+# Include the review ID and comparison code so an old screen cannot approve newer contents.
+# For incomplete verification, also carry the acknowledgement naming the unverified checks.
 class ApprovalRequest(Model):
     review_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     digest: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -44,52 +48,70 @@ class ApprovalRequest(Model):
     incomplete_acknowledgement: IncompleteAcknowledgement | None = None
 
 
+# Carry values submitted from the current environment form.
+# Include the form's comparison code so the service can reject outdated submissions.
+# The service keeps actual values in memory and saves only their field states.
 class EnvValuesRequest(Model):
     schema_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     values: dict[str, str] = Field(max_length=3000)
 
 
+# Return the saved execution record for this run.
+# Include current checks, attempts, diagnostics, and cleanup state.
+# Actual secret values are held in the environment session rather than this response record.
 @router.get("/{run_id}/verification")
 def verification(run_id: str, request: Request):
     return request.app.state.artifacts.store.load_run(run_id).execution
 
 
+# Ask the service to stop this run's execution.
+# The service handles cancellation signalling and any necessary recovery.
+# Return the resulting run state so the testing interface can show progress or cleanup problems.
 @router.post("/{run_id}/verification/cancel")
 async def cancel_verification(run_id: str, request: Request):
     return await request.app.state.artifacts.cancel_execution(run_id)
 
 
+# Return the current environment form for this candidate.
+# The service refreshes local-file and session state before returning it.
+# The response describes names and resolution states rather than exposing stored secret values.
 @router.get("/{run_id}/verification/env-form")
 def environment_form(run_id: str, request: Request):
     return request.app.state.artifacts.environment_form(run_id)
 
 
+# Pass the submitted values and form comparison code to the service.
+# Let the environment manager validate the complete submission before accepting it.
+# Return refreshed form state so the interface can continue verification with valid configuration.
 @router.post("/{run_id}/verification/env-values")
 def submit_environment(run_id: str, body: EnvValuesRequest, request: Request):
     return request.app.state.artifacts.submit_environment(run_id, body.schema_digest, body.values)
 
 
+# Ask the service to analyze the repository and plan the requested files.
+# Forward the app strategies, provider choice, and explicitly approved patch specifications.
+# Return the plan for inspection before starting a generation run.
 @router.post("/plan", response_model=ArtifactPlan)
-# Creates a plan for files that may be generated.
-# Scans the source and returns ownership and unresolved questions for inspection.
 async def plan_artifacts(body: PlanRequest, request: Request):
     return await request.app.state.artifacts.plan(
         body.path, body.strategies, body.provider, body.patches
     )
 
 
+# Start a saved plan for the selected GitHub repository.
+# Forward the source-path selection to the service's baseline review process.
+# Return the run state so the client can see which review or execution action is next.
 @router.post("", response_model=ArtifactRun, status_code=201)
-# Starts a saved generation plan.
-# Creates a run and returns its current review status.
 async def start_run(body: RunRequest, request: Request):
     return await request.app.state.artifacts.start(
         body.plan_id, body.owner, body.name, body.selected_paths
     )
 
 
+# Return the run's current saved progress and results.
+# Remove review diff text from this general status response.
+# The dedicated review endpoint supplies the full diff when the user wants to inspect changes.
 @router.get("/{run_id}", response_model=ArtifactRun)
-# Returns the current state of a generation run.
-# Includes progress and validation results while the review endpoint supplies the diff.
 def inspect_run(run_id: str, request: Request):
     run = request.app.state.artifacts.store.load_run(run_id)
     for review in run.reviews.values():
@@ -97,23 +119,27 @@ def inspect_run(run_id: str, request: Request):
     return run
 
 
+# Pass the chosen source paths to the service.
+# The service checks that selection is still open and prepares the appropriate review.
+# Return the updated run rather than writing source files directly in this route.
 @router.post("/{run_id}/source-selection", response_model=ArtifactRun)
-# Records which changed source files should be reviewed.
-# Creates a review of the selected files without committing them.
 async def select_source(run_id: str, body: SourceSelection, request: Request):
     return await request.app.state.artifacts.select_source(run_id, body.paths)
 
 
+# Continue generation or verification for the saved run.
+# The service decides whether to generate files, request configuration, retry checks, or prepare
+# final review.
+# This route contains no separate Docker or repair logic.
 @router.post("/{run_id}/execute", response_model=ArtifactRun)
-# Continues a run after the required source review.
-# Runs the generation tasks and saves their checked results.
 async def execute_run(run_id: str, request: Request):
     return await request.app.state.artifacts.execute(run_id)
 
 
+# Return the most recently created review and the run's saved decisions.
+# Reject the request when no review has been prepared yet.
+# The returned diff and comparison code are the exact contents the user is being asked to approve.
 @router.get("/{run_id}/review")
-# Returns the files and changes awaiting a decision.
-# Includes the target, checksums and previous decisions for the run.
 def inspect_review(run_id: str, request: Request):
     run = request.app.state.artifacts.store.load_run(run_id)
     if not run.reviews:
@@ -122,25 +148,29 @@ def inspect_review(run_id: str, request: Request):
     return {"review": review, "approvals": run.approvals}
 
 
+# Send the decision, review identity, and optional incomplete acknowledgement to the service.
+# The existing approval code verifies that they match the current review.
+# Return the updated run after the decision is recorded.
 @router.post("/{run_id}/approvals", response_model=ArtifactRun)
-# Records a decision on the displayed review.
-# Checks the source and review checksum before saving approval or rejection.
 def approve(run_id: str, body: ApprovalRequest, request: Request):
     return request.app.state.artifacts.approve(
         run_id, body.review_id, body.digest, body.decision, body.incomplete_acknowledgement
     )
 
 
+# Ask the service to publish the approved branch.
+# The service and publisher recheck verification, configuration, and approval before Git
+# operations.
+# Return the run with its publication outcome; this does not deploy the app.
 @router.post("/{run_id}/publish", response_model=ArtifactRun)
-# Publishes an approved set of changes to GitHub.
-# Checks the approved branch and verifies the resulting remote commit.
 async def publish(run_id: str, request: Request):
     return await request.app.state.artifacts.publish(run_id)
 
 
+# Return the run's current status, errors, and saved publication result.
+# The result can still be absent while generation, verification, or approval is pending.
+# Also state explicitly that this workflow has not executed a deployment.
 @router.get("/{run_id}/result")
-# Returns the repository revision produced by a completed run.
-# Waits until the remote commit has been verified before providing the handoff.
 def result(run_id: str, request: Request):
     run = request.app.state.artifacts.store.load_run(run_id)
     return {

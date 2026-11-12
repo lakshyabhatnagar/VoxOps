@@ -1,0 +1,15 @@
+{
+  "repository": "vercel/nextjs-postgres-nextauth-tailwindcss-template",
+  "revision": "fe026711c19ac3ee4589c86a738f59b84e611559",
+  "frameworks": [
+    "nextjs"
+  ],
+  "roles": [
+    "fullstack_web"
+  ],
+  "strategy": "native",
+  "source_bytes": 207391,
+  "archive_bytes": 71470,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "blocked_unpinned_manager"
+}

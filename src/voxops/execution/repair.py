@@ -9,6 +9,10 @@ from voxops.execution.diagnostics import repair_target
 from voxops.storage.artifact_store import digest
 
 
+# Ask the existing Stage 2 generator to correct the file identified by an execution failure.
+# First check that the plan, previously accepted proposal, and applied file hash still agree.
+# Reuse the same task, attempt history, and budget so verification cannot bypass the content-
+# attempt limit.
 async def propose_repair(
     run: ArtifactRun,
     root: Path,

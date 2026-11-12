@@ -1,0 +1,401 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "b454a422f0194e8ca019b95e1c3b03b2",
+    "scanned_at": "2026-11-12T14:29:49.349134Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "29b33dfc631e2047ae8d9ccd",
+    "display_name": "next_database",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".env.example",
+      ".gitignore",
+      "README.md",
+      "app/(dashboard)/actions.ts",
+      "app/(dashboard)/customers/page.tsx",
+      "app/(dashboard)/error.tsx",
+      "app/(dashboard)/layout.tsx",
+      "app/(dashboard)/nav-item.tsx",
+      "app/(dashboard)/page.tsx",
+      "app/(dashboard)/product.tsx",
+      "app/(dashboard)/products-table.tsx",
+      "app/(dashboard)/providers.tsx",
+      "app/(dashboard)/search.tsx",
+      "app/(dashboard)/user.tsx",
+      "app/api/auth/[...nextauth]/route.ts",
+      "app/api/seed/route.ts",
+      "app/layout.tsx",
+      "app/login/page.tsx",
+      "components/icons.tsx",
+      "components/ui/badge.tsx",
+      "components/ui/breadcrumb.tsx",
+      "components/ui/button.tsx",
+      "components/ui/card.tsx",
+      "components/ui/dropdown-menu.tsx",
+      "components/ui/input.tsx",
+      "components/ui/sheet.tsx",
+      "components/ui/table.tsx",
+      "components/ui/tabs.tsx",
+      "components/ui/tooltip.tsx",
+      "lib/auth.ts",
+      "lib/db.ts",
+      "lib/utils.ts",
+      "middleware.ts",
+      "next.config.ts",
+      "package.json",
+      "pnpm-lock.yaml",
+      "postcss.config.js",
+      "tailwind.config.ts"
+    ],
+    "shallow_tree": [
+      ".env.example",
+      ".gitignore",
+      "LICENSE.md",
+      "README.md",
+      "app/(dashboard)/actions.ts",
+      "app/(dashboard)/customers/page.tsx",
+      "app/(dashboard)/error.tsx",
+      "app/(dashboard)/layout.tsx",
+      "app/(dashboard)/nav-item.tsx",
+      "app/(dashboard)/page.tsx",
+      "app/(dashboard)/product.tsx",
+      "app/(dashboard)/products-table.tsx",
+      "app/(dashboard)/providers.tsx",
+      "app/(dashboard)/search.tsx",
+      "app/(dashboard)/user.tsx",
+      "app/api/auth/[...nextauth]/route.ts",
+      "app/api/seed/route.ts",
+      "app/favicon.ico",
+      "app/globals.css",
+      "app/layout.tsx",
+      "app/login/page.tsx",
+      "components/icons.tsx",
+      "components/ui/badge.tsx",
+      "components/ui/breadcrumb.tsx",
+      "components/ui/button.tsx",
+      "components/ui/card.tsx",
+      "components/ui/dropdown-menu.tsx",
+      "components/ui/input.tsx",
+      "components/ui/sheet.tsx",
+      "components/ui/table.tsx",
+      "components/ui/tabs.tsx",
+      "components/ui/tooltip.tsx",
+      "components.json",
+      "lib/auth.ts",
+      "lib/db.ts",
+      "lib/utils.ts",
+      "middleware.ts",
+      "next.config.ts",
+      "package.json",
+      "pnpm-lock.yaml",
+      "postcss.config.js",
+      "public/placeholder-user.jpg",
+      "public/placeholder.svg",
+      "tailwind.config.ts",
+      "tsconfig.json"
+    ],
+    "manifests": [
+      {
+        "path": "package.json",
+        "root_path": ".",
+        "kind": "node",
+        "dependencies": [
+          "@neondatabase/serverless",
+          "@radix-ui/react-dialog",
+          "@radix-ui/react-dropdown-menu",
+          "@radix-ui/react-slot",
+          "@radix-ui/react-tabs",
+          "@radix-ui/react-tooltip",
+          "@types/node",
+          "@types/react",
+          "@types/react-dom",
+          "@vercel/analytics",
+          "autoprefixer",
+          "class-variance-authority",
+          "clsx",
+          "drizzle-kit",
+          "drizzle-orm",
+          "drizzle-zod",
+          "lucide-react",
+          "next",
+          "next-auth",
+          "postcss",
+          "prettier",
+          "prop-types",
+          "react",
+          "react-dom",
+          "server-only",
+          "tailwind-merge",
+          "tailwindcss",
+          "tailwindcss-animate",
+          "typescript",
+          "zod"
+        ],
+        "scripts": {
+          "dev": "[redacted command]",
+          "build": "next build",
+          "start": "next start"
+        },
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": null,
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {
+      ".env.example": [
+        {
+          "name": "AUTH_GITHUB_ID",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "example_only"
+        },
+        {
+          "name": "AUTH_GITHUB_SECRET",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "secret",
+          "presence": "example_only"
+        },
+        {
+          "name": "AUTH_SECRET",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "secret",
+          "presence": "example_only"
+        },
+        {
+          "name": "NEXTAUTH_URL",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "example_only"
+        },
+        {
+          "name": "POSTGRES_URL",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "example_only"
+        }
+      ],
+      "lib/db.ts": [
+        {
+          "name": "POSTGRES_URL",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "path": "app/(dashboard)/actions.ts",
+        "kind": "next_action",
+        "field": "server action",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "app/(dashboard)/user.tsx",
+        "kind": "next_action",
+        "field": "server action",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "app/api/auth/[...nextauth]/route.ts",
+        "kind": "next_api",
+        "field": "API route file",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "app/api/seed/route.ts",
+        "kind": "next_api",
+        "field": "API route file",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "app/login/page.tsx",
+        "kind": "next_action",
+        "field": "server action",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "lib/db.ts",
+        "kind": "next_server",
+        "field": "server-only capability",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "middleware.ts",
+        "kind": "next_server",
+        "field": "middleware file",
+        "confidence": 0.95,
+        "source": "deterministic"
+      }
+    ],
+    "warnings": [],
+    "input_fingerprint": "6a4a8c19d957e57a76daf34e18b37e5ee0321137931517909644902986abe45f",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "781cdbbf51a2396c",
+      "name": "next_database",
+      "root_path": ".",
+      "role": "fullstack_web",
+      "framework": "nextjs",
+      "language": "javascript",
+      "runtime": {
+        "language": "javascript",
+        "version": null,
+        "package_manager": "pnpm",
+        "dependency_files": [
+          "package.json"
+        ],
+        "build_command": "pnpm run build",
+        "start_command": "pnpm run start",
+        "prerequisite_commands": [],
+        "command_source": "explicit",
+        "output_directory": null,
+        "workspace_root": null,
+        "lockfile_path": "pnpm-lock.yaml"
+      },
+      "config_requirements": [
+        {
+          "name": "AUTH_GITHUB_ID",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "example_only"
+        },
+        {
+          "name": "AUTH_GITHUB_SECRET",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "secret",
+          "presence": "example_only"
+        },
+        {
+          "name": "AUTH_SECRET",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "secret",
+          "presence": "example_only"
+        },
+        {
+          "name": "NEXTAUTH_URL",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "example_only"
+        },
+        {
+          "name": "POSTGRES_URL",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "example_only"
+        }
+      ],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "nextjs",
+        "root_path": ".",
+        "role_candidate": "fullstack_web",
+        "evidence": [
+          {
+            "path": "package.json",
+            "kind": "dependency",
+            "field": "next",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "app/(dashboard)/actions.ts",
+            "kind": "next_action",
+            "field": "server action",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "app/(dashboard)/user.tsx",
+            "kind": "next_action",
+            "field": "server action",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "app/api/auth/[...nextauth]/route.ts",
+            "kind": "next_api",
+            "field": "API route file",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "app/api/seed/route.ts",
+            "kind": "next_api",
+            "field": "API route file",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "app/login/page.tsx",
+            "kind": "next_action",
+            "field": "server action",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "lib/db.ts",
+            "kind": "next_server",
+            "field": "server-only capability",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "middleware.ts",
+            "kind": "next_server",
+            "field": "middleware file",
+            "confidence": 0.95,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": []
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [],
+  "unresolved_ambiguities": [],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}

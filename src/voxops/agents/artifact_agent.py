@@ -13,6 +13,7 @@ credentials, invent URLs, weaken CORS, expose secrets in public environment vari
 cloud deployment or alter unrelated application behavior. Use actual package scripts, lock
 names, monorepo context, startup commands and prerequisites in the requirements. Do not invent
 tests or coverage. CI is build/test only with contents: read and pinned official actions.
+Use only the exact action names and commit hashes in requirements.approved_actions.
 Checkout must set persist-credentials: false. Never expose secrets or github.token expressions.
 Preserve useful existing content and comments when repairing a deployment artifact. If it is
 empty or too broken to repair in place, replace it completely using the supplied evidence.

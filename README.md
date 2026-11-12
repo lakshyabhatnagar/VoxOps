@@ -82,9 +82,10 @@ Settings do not load `.env` automatically. Use `uv run --env-file .env voxops` t
 | `VOXOPS_DATA_DIR` | `.voxops`, private atomic JSON result/worktree records |
 | `VOXOPS_MAX_DEPTH` | 8 directory levels |
 | `VOXOPS_MAX_FILES` | 3000 total directory entries visited |
-| `VOXOPS_MAX_FILE_BYTES` | 131072 bytes per targeted manifest/source/env file |
-| `VOXOPS_MAX_CONTEXT_CHARS` | 16000 characters of sanitized model JSON |
+| `VOXOPS_MAX_FILE_BYTES` | 1048576 bytes per targeted manifest/source/env file |
+| `VOXOPS_MAX_CONTEXT_CHARS` | 64000 characters of sanitized model JSON, configurable up to 128000 |
 | `VOXOPS_MODEL_TIMEOUT` | 20 seconds per optional specialist call |
+| `VOXOPS_ARTIFACT_MODEL_TIMEOUT` | 180 seconds per Stage 2 generation or repair request, configurable up to 300 |
 | `VOXOPS_MODEL` | `anthropic:claude-sonnet-4-5`; replaceable provider/model string |
 | `ANTHROPIC_API_KEY` | Optional secret, environment only |
 | `OPENAI_API_KEY` | Optional alternative provider secret, environment only |

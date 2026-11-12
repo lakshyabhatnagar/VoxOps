@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from uuid import uuid4
 
+from voxops.artifacts.security import redact
 from voxops.core.errors import AppError
 from voxops.core.settings import Settings
 from voxops.domain.execution_models import (
@@ -30,12 +31,19 @@ from voxops.execution.readiness import observe_process, probe_http
 from voxops.storage.artifact_store import digest
 
 
+# Carry one app's fully prepared execution settings and input comparison code.
+# The runner learns concrete tool versions while preparing the build.
+# The service saves this update so later results can be compared with the same tools and inputs.
 @dataclass(frozen=True)
 class PreparedUnit:
     spec: UnitExecutionSpec
     task_input_digest: str
 
 
+# Return the execution plan, per-app results, and attempt history together.
+# The plan includes concrete tool details discovered during execution.
+# The service uses all three parts when saving evidence, deciding on repairs, and preparing final
+# review.
 @dataclass(frozen=True)
 class ExecutionOutcome:
     plan: ExecutionPlan
@@ -43,10 +51,20 @@ class ExecutionOutcome:
     attempts: tuple[ExecutionAttempt, ...]
 
 
+# Run each app's planned build and readiness checks using the Docker driver.
+# Reuse successful results only when the relevant inputs and tools still agree.
+# Keep failed attempts, support explicit retries, and clean up resources after each app's work.
 class ExecutionRunner:
+    # Remember execution settings and the function that creates a Docker driver.
+    # The caller supplies the driver so tests can use the simulated Docker boundary.
+    # The same runner logic therefore handles production execution and controlled test scenarios.
     def __init__(self, settings: Settings, driver_factory: Callable[[str], DockerDriver]):
         self.settings, self.driver_factory = settings, driver_factory
 
+    # Coordinate verification for every app while respecting cross-app dependencies.
+    # Check frozen inputs, preserve attempt numbering, and reuse suitable successful results.
+    # Explicit requests can retry failed results; automatic continuation keeps the existing retry
+    # restrictions.
     async def run(
         self,
         plan: ExecutionPlan,
@@ -78,6 +96,10 @@ class ExecutionRunner:
             numbers[attempt.task_id] = max(numbers.get(attempt.task_id, 0), attempt.attempt_number)
         limit = asyncio.Semaphore(self.settings.execution_max_parallel)
 
+        # Send a progress or evidence update to an optional caller callback.
+        # Accept both ordinary functions and functions that return something awaitable.
+        # This lets the service save changes without making the runner depend on its storage
+        # implementation.
         async def notify(callback, item):
             if callback:
                 result = callback(item)
@@ -103,6 +125,10 @@ class ExecutionRunner:
             pending = {key: value - ready for key, value in pending.items() if key not in ready}
         unit_futures = {}
 
+        # Wait for this app's prerequisite apps and check whether they passed.
+        # Compare old results with current inputs and toolchain details before deciding whether
+        # reuse is valid.
+        # Otherwise run fresh checks under the configured parallel-work limit.
         async def run_unit(unit_id):
             prerequisites = [await unit_futures[key] for key in sorted(dependencies[unit_id])]
             if any(result.status != "passed" for result in prerequisites):
@@ -134,6 +160,11 @@ class ExecutionRunner:
                 verify_context(contexts[unit_id])
                 driver = None
 
+                # Inspect previous failed attempts for these exact app inputs.
+                # Allow the existing single automatic retry for supported registry or Docker
+                # availability failures.
+                # Other unchanged failures require an explicit retry or a changed input rather
+                # than endless automatic retries.
                 def retryable(checksum):
                     failed = [
                         item
@@ -229,6 +260,9 @@ class ExecutionRunner:
                     driver,
                 )
 
+        # Run one app and report its completed result through the callback.
+        # Copy the result before handing it to the caller.
+        # Return the same result for the final collection of all app outcomes.
         async def unit_worker(unit_id):
             result = await run_unit(unit_id)
             await notify(on_unit, result.model_copy(deep=True))
@@ -248,6 +282,9 @@ class ExecutionRunner:
             prepared, {result.unit_id: result for result in results}, tuple(attempts)
         )
 
+    # Build one app, then verify its static output or start and probe its server.
+    # Record the commands' attempts and turn known execution failures into useful check results.
+    # Always run owned-resource cleanup before returning, including after cancellation.
     async def _unit(
         self,
         plan,
@@ -273,6 +310,10 @@ class ExecutionRunner:
             if value
         }
 
+        # Hide this app's known values before preparing saved diagnostic text.
+        # Then apply session-wide and driver-provided redaction too.
+        # This protects values even if a command prints them in a form one redactor does not
+        # recognize.
         def redact(text):
             for value in sorted(known_values, key=len, reverse=True):
                 text = text.replace(value, "[REDACTED]")
@@ -285,6 +326,9 @@ class ExecutionRunner:
         current_operation = "build"
         prepared_input = False
 
+        # Calculate the final input comparison code after concrete build tools are known.
+        # Attach it to this app's planned jobs and notify the service.
+        # Later attempt records can then point to the exact settings and tools they actually used.
         async def prepare():
             nonlocal prepared_input
             checksum = self._input_digest(spec, context, session, generation)
@@ -294,6 +338,9 @@ class ExecutionRunner:
             prepared_input = True
             await notify(on_prepared, PreparedUnit(spec.model_copy(deep=True), checksum))
 
+        # Create the next attempt record for a build, startup, probe, or static-output operation.
+        # Continue numbering from earlier attempts rather than resetting on retry.
+        # Notify the caller that this attempt has started before running the operation.
         async def start(operation):
             nonlocal active, current_operation
             current_operation = operation
@@ -310,6 +357,9 @@ class ExecutionRunner:
             )
             await notify(on_attempt, active.model_copy(deep=True))
 
+        # Mark the active attempt as passed and record bounded, redacted evidence.
+        # Save duration, exit, and memory-related details when they are available.
+        # Append a copy to the history and notify the service before starting another operation.
         async def finish(evidence, *, exit_code=0, duration=None, oom=None):
             nonlocal active
             active.status, active.ended_at = "passed", datetime.now(UTC)
@@ -321,6 +371,10 @@ class ExecutionRunner:
             active = None
             return result
 
+        # Create one passed check linked to its completed attempt.
+        # Keep short redacted evidence and the HTTP status when relevant.
+        # These checks support the final app result instead of treating an executed command alone
+        # as proof of success.
         def check(kind, attempt, evidence, status=None):
             checks[kind] = CheckResult(
                 check_id=f"{unit_id}:{kind}",
@@ -628,6 +682,10 @@ class ExecutionRunner:
             diagnostics=diagnostics,
         )
 
+    # Calculate a comparison code for one app's context, commands, form structure, and
+    # verification rules.
+    # Include a random configuration-change marker when the app receives configured values.
+    # Do not hash the secret values themselves into a saved public identity.
     def _input_digest(self, spec, context, session, generation):
         schema = []
         for item in session.schema.requirements:
@@ -652,6 +710,10 @@ class ExecutionRunner:
             }
         )
 
+    # Check for unresolved configuration before starting this app's operations.
+    # Require its mandatory fields and current change marker when it receives configured values.
+    # Return a structured error so missing configuration is not mistaken for an application build
+    # defect.
     @staticmethod
     def _environment_error(session, unit_id, generation):
         if session.schema.ambiguities:
@@ -677,6 +739,10 @@ class ExecutionRunner:
             )
         return None
 
+    # Translate command cancellation, timeout, and nonzero exit into execution errors.
+    # Keep a bounded part of the command output to explain failure.
+    # Build failures and invalid later output receive different categories for the repair
+    # decision.
     @staticmethod
     def _require_success(result: CommandOutcome, stage: str):
         if result.cancelled:
@@ -686,10 +752,15 @@ class ExecutionRunner:
         if result.exit_code != 0:
             raise AppError(
                 "BUILD_FAILED" if stage == "build" else "INVALID_ARTIFACT",
-                f"{stage} command failed with exit {result.exit_code}. " + result.output[:1500],
+                f"{stage} command failed with exit {result.exit_code}. "
+                + redact(result.output)[-1500:],
                 409,
             )
 
+    # Choose the validated service port, using supplied PORT when supported.
+    # Reject invalid numbers or conflicts with a fixed Dockerfile port.
+    # The driver needs this container port to create the correct local port binding for readiness
+    # checks.
     @staticmethod
     def _runtime_port(spec, session, unit_id):
         values = {}

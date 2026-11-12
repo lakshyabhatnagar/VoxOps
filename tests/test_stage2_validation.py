@@ -197,7 +197,7 @@ def test_workflow_security() -> None:
     valid = (
         "on: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  test:\n"
         "    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@"
-        + "a" * 40
+        + "11bd71901bbe5b1630ceea73d27597364c9af683"
         + "\n        with:\n          persist-credentials: false\n      - run: npm test\n"
     )
     assert validate_artifact(task, valid, plan)[0].status == "passed"
@@ -371,7 +371,7 @@ def test_source_repair_keeps_file_size_limit(tmp_path, character):
         target_path="settings.py",
         reason="Repair settings",
     )
-    replacement = 'VALUE = "' + character * 131072 + '"\n'
+    replacement = 'VALUE = "' + character * 1048576 + '"\n'
     findings = validate_artifact(task, replacement, plan_for(task), root=tmp_path)
     assert findings[0].status == "failed"
     assert "Artifact exceeds the size limit." in findings[0].messages

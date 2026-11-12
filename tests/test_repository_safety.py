@@ -33,7 +33,7 @@ def test_scan_secrets_bounds_and_no_execution(tmp_path):
     (root / "large.py").write_text("x" * 150000)
     marker = tmp_path / "executed"
     (root / "poison.py").write_text(f"open({str(marker)!r}, 'w').write('executed')")
-    scan = scan_repository(root, settings_for(tmp_path))
+    scan = scan_repository(root, settings_for(tmp_path, max_file_bytes=131072))
     serialized = scan.model_dump_json()
     assert secret not in serialized
     assert "DATABASE_URL" in serialized and "TOKEN" in serialized

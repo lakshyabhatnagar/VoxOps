@@ -1,0 +1,276 @@
+{
+  "plan": {
+    "schema_version": "1",
+    "plan_id": "fac961600fa043b5abbdff28e9f55005",
+    "revision": 1,
+    "scan_id": "6fd6880c09f44bd7a9cb78c5b09ae820",
+    "repo_fingerprint": "c02668001d29b62f851a4057",
+    "source_input_fingerprint": "325b8bb51d980f4c2ad1e8c8524c6af13df385f265a4f78226ad1f5b070bc58a",
+    "strategy_by_unit": {
+      "781cdbbf51a2396c": "native"
+    },
+    "units": [
+      {
+        "id": "781cdbbf51a2396c",
+        "name": "next_starter",
+        "root_path": ".",
+        "role": "fullstack_web",
+        "framework": "nextjs",
+        "language": "javascript",
+        "runtime": {
+          "language": "javascript",
+          "version": null,
+          "package_manager": "npm",
+          "dependency_files": [
+            "package.json"
+          ],
+          "build_command": "npm run build",
+          "start_command": "npm run start",
+          "prerequisite_commands": [],
+          "command_source": "explicit",
+          "output_directory": null,
+          "workspace_root": null,
+          "lockfile_path": "package-lock.json"
+        },
+        "config_requirements": [
+          {
+            "name": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+            "necessity": "unknown",
+            "stage": "build_time",
+            "visibility": "public",
+            "presence": "referenced"
+          },
+          {
+            "name": "NEXT_PUBLIC_SUPABASE_URL",
+            "necessity": "unknown",
+            "stage": "build_time",
+            "visibility": "public",
+            "presence": "referenced"
+          },
+          {
+            "name": "SUPABASE_SERVICE_ROLE_KEY",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "referenced"
+          }
+        ],
+        "dependency_candidates": [],
+        "shared_packages": [],
+        "detection": {
+          "framework": "nextjs",
+          "root_path": ".",
+          "role_candidate": "fullstack_web",
+          "evidence": [
+            {
+              "path": "package.json",
+              "kind": "dependency",
+              "field": "next",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "src/app/auth/callback/route.ts",
+              "kind": "next_api",
+              "field": "API route file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "src/app/auth/login/actions.ts",
+              "kind": "next_action",
+              "field": "server action",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "src/lib/supabase/middleware.ts",
+              "kind": "next_server",
+              "field": "middleware file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "src/lib/supabase/middleware.ts",
+              "kind": "next_server",
+              "field": "custom server",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "src/proxy.ts",
+              "kind": "next_server",
+              "field": "middleware file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            }
+          ],
+          "confidence": 0.95,
+          "unresolved_questions": []
+        }
+      }
+    ],
+    "tasks": {
+      "gitignore": {
+        "task_id": "gitignore",
+        "unit_id": null,
+        "artifact_type": "gitignore",
+        "target_path": ".gitignore",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "next.config.ts",
+          "package-lock.json",
+          "package.json",
+          "src/app/auth/auth-code-error/page.tsx",
+          "src/app/auth/callback/route.test.ts",
+          "src/app/auth/callback/route.ts",
+          "src/app/auth/login/actions.ts",
+          "src/app/auth/login/login-form.tsx",
+          "src/app/auth/login/page.tsx",
+          "src/app/globals.css",
+          "src/app/layout.tsx",
+          "src/app/page.tsx",
+          "src/components/providers.tsx",
+          "src/components/theme-provider.tsx",
+          "src/components/theme-toggle.tsx",
+          "src/components/ui/accordion.tsx",
+          "src/components/ui/alert-dialog.test.tsx",
+          "src/components/ui/alert-dialog.tsx",
+          "src/components/ui/alert.tsx",
+          "src/components/ui/aspect-ratio.tsx",
+          "src/components/ui/attachment.tsx",
+          "src/components/ui/avatar.tsx",
+          "src/components/ui/badge.tsx",
+          "src/components/ui/breadcrumb.tsx",
+          "src/components/ui/bubble.tsx",
+          "src/components/ui/button-group.tsx",
+          "src/components/ui/button.test.tsx",
+          "src/components/ui/button.tsx",
+          "src/components/ui/calendar.tsx",
+          "src/components/ui/card.tsx",
+          "src/components/ui/carousel.tsx",
+          "src/components/ui/chart.tsx",
+          "src/components/ui/checkbox.tsx",
+          "src/components/ui/collapsible.tsx",
+          "src/components/ui/combobox.tsx",
+          "src/components/ui/command.tsx",
+          "src/components/ui/context-menu.tsx",
+          "src/components/ui/dialog.tsx",
+          "src/components/ui/direction.tsx",
+          "src/components/ui/drawer.tsx",
+          "src/components/ui/dropdown-menu.tsx",
+          "src/components/ui/empty.tsx",
+          "src/components/ui/field.tsx",
+          "src/components/ui/form.test.tsx",
+          "src/components/ui/form.tsx",
+          "src/components/ui/hover-card.tsx",
+          "src/components/ui/input-group.tsx",
+          "src/components/ui/input-otp.tsx",
+          "src/components/ui/input.tsx",
+          "src/components/ui/item.tsx",
+          "src/components/ui/kbd.tsx",
+          "src/components/ui/label.tsx",
+          "src/components/ui/marker.tsx",
+          "src/components/ui/menubar.tsx",
+          "src/components/ui/message-scroller.tsx",
+          "src/components/ui/message.tsx",
+          "src/components/ui/native-select.tsx",
+          "src/components/ui/navigation-menu.tsx",
+          "src/components/ui/pagination.tsx",
+          "src/components/ui/popover.tsx",
+          "src/components/ui/progress.tsx",
+          "src/components/ui/questionnaire.test.tsx",
+          "src/components/ui/questionnaire.tsx",
+          "src/components/ui/radio-group.tsx",
+          "src/components/ui/resizable.tsx",
+          "src/components/ui/scroll-area.tsx",
+          "src/components/ui/select.tsx",
+          "src/components/ui/separator.tsx",
+          "src/components/ui/sheet.tsx",
+          "src/components/ui/sidebar.tsx",
+          "src/components/ui/skeleton.tsx",
+          "src/components/ui/slider.test.tsx",
+          "src/components/ui/slider.tsx",
+          "src/components/ui/sonner.tsx",
+          "src/components/ui/spinner.tsx",
+          "src/components/ui/switch.tsx",
+          "src/components/ui/table.tsx",
+          "src/components/ui/tabs.tsx",
+          "src/components/ui/textarea.tsx",
+          "src/components/ui/toast.test.tsx",
+          "src/components/ui/toast.tsx",
+          "src/components/ui/toggle-group.tsx",
+          "src/components/ui/toggle.tsx",
+          "src/components/ui/tooltip.tsx",
+          "src/hooks/use-mobile.ts",
+          "src/lib/auth/schemas.ts",
+          "src/lib/supabase/client.ts",
+          "src/lib/supabase/config.ts",
+          "src/lib/supabase/middleware.ts",
+          "src/lib/supabase/server.ts",
+          "src/lib/utils.test.ts",
+          "src/lib/utils.ts",
+          "src/proxy.ts",
+          "src/test/setup.ts",
+          "vitest.config.ts"
+        ],
+        "expected_commands": [],
+        "existing_hash": "6684fe7c289669a33e38b16af132981decd6035b7da52d3c2e88095ad3f08d5d",
+        "max_attempts": 3,
+        "reason": "Exclude local credentials and generated dependencies from publication.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "ci": {
+        "task_id": "ci",
+        "unit_id": null,
+        "artifact_type": "ci",
+        "target_path": ".github/workflows/ci.yml",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [
+          "npm run build"
+        ],
+        "existing_hash": "fcc90c9ea6d4c23e1c6f44d837ca2444d010e97bc17c56630f0f642e00dd8fef",
+        "max_attempts": 3,
+        "reason": "One build/test workflow covers the detected units without cloud deployment.",
+        "evidence": [
+          "package.json"
+        ],
+        "approval_class": "artifact"
+      },
+      "provider": {
+        "task_id": "provider",
+        "unit_id": null,
+        "artifact_type": "provider",
+        "target_path": "voxops-provider.json",
+        "operation": "skip",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "No provider target selected; no provider configuration needed.",
+        "evidence": [],
+        "approval_class": "artifact"
+      }
+    },
+    "warnings": [
+      "Static validation does not prove a build, running app, or GitHub CI success."
+    ],
+    "unresolved_questions": [],
+    "provider": null
+  },
+  "files": {
+    ".gitignore": "# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.\n\n# dependencies\n/node_modules\n/.pnp\n.pnp.*\n.yarn/*\n!.yarn/patches\n!.yarn/plugins\n!.yarn/releases\n!.yarn/versions\n\n# testing\n/coverage\n\n# next.js\n/.next/\n/out/\n\n# production\n/build\n\n# misc\n.DS_Store\n*.pem\n\n# debug\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\n.pnpm-debug.log*\n\n# env files (can opt-in for committing if needed)\n.env*\n!.env.example\n\n# vercel\n.vercel\n\n# typescript\n*.tsbuildinfo\nnext-env.d.ts\n\nraw-data/*\n\n.claude/settings.local.json\n.claude/worktrees/\n.env\n.env.*\n.git/\n*.key\n",
+    ".github/workflows/ci.yml": "name: CI\npermissions:\n  contents: read\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: 24\n          cache: npm\n      - run: npm ci\n      - run: npm run lint\n      - run: npm run type-check\n      - run: npm test\n      - run: npm run build\n"
+  }
+}

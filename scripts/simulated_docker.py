@@ -10,9 +10,17 @@ from voxops.core.settings import Settings
 from voxops.execution.docker_driver import CommandOutcome, DockerDriver
 
 
+# Replace the Docker command boundary with deterministic in-memory responses for tests.
+# Remember created resources, labels, limits, removals, and command arguments.
+# The real driver logic can then be tested without building images or claiming that a real engine
+# ran.
 class SimulatedDocker(DockerDriver):
     """Deterministic Docker boundary for unit tests, never a product execution mode."""
 
+    # Create empty simulated resource and command records.
+    # Pass normal settings, ownership callbacks, and cancellation into the real driver
+    # constructor.
+    # Tests can inspect those records to confirm which operations the driver attempted.
     def __init__(self, settings=None, cancel=None):
         self.events = []
         self.removed = []
@@ -29,6 +37,11 @@ class SimulatedDocker(DockerDriver):
             lambda s: s,
         )
 
+    # Interpret the supported Docker command arguments and return a simulated response.
+    # Generate resource IDs and inspection metadata from the recorded creates and ownership
+    # records.
+    # This avoids starting Docker processes while exercising the real driver's validation and
+    # cleanup paths.
     async def command(self, args, timeout=30, **kwargs):
         self.events.append((args, timeout))
         self.now += self.clock_step
@@ -113,26 +126,48 @@ class SimulatedDocker(DockerDriver):
         return CommandOutcome(0, output, 0, _stdout=output)
 
 
+# Extend the simulated Docker boundary with a tiny real local HTTP responder.
+# Use it when testing the service's readiness and publication flow without real containers.
+# This is only a demo and test tool, not a product execution mode.
 class DemoDocker(SimulatedDocker):
+    # Initialize the simulated driver and attach the run's real journal and redactor.
+    # Remember the cancellation signal supplied by the service.
+    # Start without an HTTP server; the runtime step creates one when needed.
     def __init__(self, settings, journal, cancel, session):
         super().__init__(settings, cancel)
         self.journal, self.redact = journal, session.redact
         self.http = None
 
+    # Return a supported Node version for tool-version checks.
+    # Delegate other commands to the simulated driver's command implementation.
+    # This lets native and static verification tests record consistent tool information.
     async def exec(self, runtime, argv, timeout, **kwargs):
         if argv[-1] == "--version":
             return CommandOutcome(0, "v22.0.0", 0, _stdout="v22.0.0")
         return await super().exec(runtime, argv, timeout, **kwargs)
 
-    async def runtime(self, *args, **kwargs):
-        handle = await super().runtime(*args, **kwargs)
+    # Serve both container and native starts through their common runtime method.
+    # Replace the returned handle's host port with a real local HTTP responder's port.
+    # The service can then exercise readiness checks without claiming a real app is running.
+    async def _runtime(self, *args, **kwargs):
+        handle = await super()._runtime(*args, **kwargs)
 
+        # Serve the minimal HTTP response used by the demo runtime.
+        # Return no application data or real backend behavior.
+        # The handler proves that the readiness request path works, not that a production
+        # application is correct.
         class Handler(BaseHTTPRequestHandler):
+            # Reply to a GET request with HTTP 200 and an empty body.
+            # Send a zero content length so the client can finish immediately.
+            # That is enough for the demo's basic server-reachability check.
             def do_GET(self):
                 self.send_response(200)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
+            # Suppress the standard HTTP server's request log output.
+            # The simulated endpoint does not need console access logs for these tests.
+            # This keeps demo output focused on VoxOps results and assertions.
             def log_message(self, *args):
                 pass
 
@@ -143,6 +178,9 @@ class DemoDocker(SimulatedDocker):
         self.thread.start()
         return replace(handle, host_port=self.http.server_port)
 
+    # Run the ordinary simulated Docker cleanup first.
+    # Always stop and close the local HTTP server afterward, even when cleanup raises.
+    # Join its thread and clear the reference so tests do not leave a server running.
     async def cleanup(self, resources=None, **kwargs):
         try:
             await super().cleanup(resources, **kwargs)

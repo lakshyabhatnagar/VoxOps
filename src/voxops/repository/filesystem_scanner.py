@@ -211,7 +211,7 @@ def source_evidence(path: str, text: str) -> list[Evidence]:
     if path.endswith(".py"):
         facts.extend(fastapi_entries(text))
     if re.search(r"(?:^|/)next\.config\.", path):
-        if re.search(r"output\s*:\s*['\"]export['\"]", text):
+        if re.search(r"(?:\boutput|['\"]output['\"])\s*:\s*['\"]export['\"]", text):
             facts.append(("next_static_export", "output: export"))
     if re.search(r"(?:^|/)vite\.config\.", path):
         if re.search(r"\blib\s*:", text):

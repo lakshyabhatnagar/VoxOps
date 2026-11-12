@@ -1,0 +1,151 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "294f26a10e964a7db880a3778cff587c",
+    "scanned_at": "2026-11-12T14:29:48.074989Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "8c50aca54978b899190e3c97",
+    "display_name": "next_static",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".gitignore",
+      "README.md",
+      "next.config.js",
+      "package-lock.json",
+      "package.json",
+      "postcss.config.js",
+      "src/app/layout.js",
+      "src/app/page.js",
+      "tailwind.config.js"
+    ],
+    "shallow_tree": [
+      ".gitignore",
+      "README.md",
+      "jsconfig.json",
+      "next.config.js",
+      "package-lock.json",
+      "package.json",
+      "postcss.config.js",
+      "public/next.svg",
+      "public/vercel.svg",
+      "src/app/favicon.ico",
+      "src/app/globals.css",
+      "src/app/layout.js",
+      "src/app/page.js",
+      "tailwind.config.js"
+    ],
+    "manifests": [
+      {
+        "path": "package.json",
+        "root_path": ".",
+        "kind": "node",
+        "dependencies": [
+          "autoprefixer",
+          "next",
+          "postcss",
+          "react",
+          "react-dom",
+          "serve",
+          "tailwindcss"
+        ],
+        "scripts": {
+          "dev": "next dev",
+          "build": "next build",
+          "start": "[redacted command]"
+        },
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": "hello-world-nextjs",
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {},
+    "evidence": [
+      {
+        "path": "next.config.js",
+        "kind": "next_static_export",
+        "field": "output: export",
+        "confidence": 0.95,
+        "source": "deterministic"
+      }
+    ],
+    "warnings": [],
+    "input_fingerprint": "4fefe4cc32a4fbabeb878097b32deda0661622779f757f2ad29309c67783dc7d",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "1340fa1d12e310f3",
+      "name": "next_static",
+      "root_path": ".",
+      "role": "static_frontend",
+      "framework": "nextjs",
+      "language": "javascript",
+      "runtime": {
+        "language": "javascript",
+        "version": null,
+        "package_manager": "npm",
+        "dependency_files": [
+          "package.json"
+        ],
+        "build_command": "npm run build",
+        "start_command": "npm run start",
+        "prerequisite_commands": [],
+        "command_source": "explicit",
+        "output_directory": "out",
+        "workspace_root": null,
+        "lockfile_path": "package-lock.json"
+      },
+      "config_requirements": [],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "nextjs",
+        "root_path": ".",
+        "role_candidate": "static_frontend",
+        "evidence": [
+          {
+            "path": "package.json",
+            "kind": "dependency",
+            "field": "next",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "next.config.js",
+            "kind": "next_static_export",
+            "field": "output: export",
+            "confidence": 0.95,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": []
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [],
+  "unresolved_ambiguities": [],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}

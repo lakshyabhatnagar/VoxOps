@@ -12,15 +12,21 @@ from voxops.repository.snapshot import capture_source
 from voxops.storage.artifact_store import digest
 
 
+# Describe the private copy of files used for one build.
+# Remember its directory, included paths, file modes, and content comparison codes.
+# Later checks use this record to detect changes before Docker consumes the copy.
 @dataclass(frozen=True)
 class FrozenContext:
     path: Path
     identity: str
     files: tuple[str, ...]
     inventory: tuple[tuple[str, str, str], ...] = ()
-    max_file_bytes: int = 131072
+    max_file_bytes: int = 1048576
 
 
+# Copy the selected build inputs into a private temporary directory.
+# Check that required inputs exist and that the originals did not change while copying.
+# Make the copy read-only and record its exact contents so the build uses a known set of files.
 def freeze_context(
     source: Path,
     *,
@@ -28,7 +34,7 @@ def freeze_context(
     selected: tuple[str, ...] | None = None,
     required: tuple[str, ...] = (),
     identity_config: dict | None = None,
-    max_file_bytes: int = 131072,
+    max_file_bytes: int = 1048576,
     parent: Path | None = None,
 ) -> FrozenContext:
     """Copy eligible inputs and fail if their contents or modes change during capture.
@@ -49,6 +55,9 @@ def freeze_context(
         if str(parent) != "." and (source / parent / ".git").exists()
     }
 
+    # Decide whether a repository path belongs in this build copy.
+    # Respect the requested context and selected paths, and exclude nested repositories.
+    # The same decision is used before and after copying to detect changed inputs consistently.
     def included(path: str) -> bool:
         if not path.startswith(prefix) or any(path.startswith(p) for p in nested_repositories):
             return False
@@ -87,6 +96,9 @@ def freeze_context(
         raise
 
 
+# Compare the private build copy with the recorded files and modes.
+# Reject added or missing paths, links, and changed contents.
+# Run this before using cached results or handing inputs to Docker.
 def verify_context(context: FrozenContext) -> None:
     expected_files = {path for path, _, _ in context.inventory}
     expected_dirs = {
@@ -113,6 +125,9 @@ def verify_context(context: FrozenContext) -> None:
         raise AppError("context_changed", "Frozen build input changed before use.", 409)
 
 
+# Delete the temporary build copy after it is no longer needed.
+# Restore directory write permissions first because the copy was made read-only.
+# If the path is a link, remove only the link rather than following it.
 def remove_context(context: FrozenContext) -> None:
     if context.path.is_symlink():
         context.path.unlink()

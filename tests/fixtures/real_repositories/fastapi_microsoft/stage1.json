@@ -1,0 +1,186 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "541df84e50e54197b9f55c327f531742",
+    "scanned_at": "2026-11-12T14:29:40.628200Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "0ad0c7f87316744545c6c314",
+    "display_name": "fastapi_microsoft",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".gitignore",
+      "README.md",
+      "flushdb.py",
+      "main.py",
+      "models.py",
+      "requirements.txt"
+    ],
+    "shallow_tree": [
+      ".devcontainer/devcontainer.json",
+      ".github/dependabot.yml",
+      ".github/workflows/test-application.yml",
+      ".gitignore",
+      "CODE_OF_CONDUCT.md",
+      "LICENSE",
+      "README.md",
+      "SECURITY.md",
+      "SUPPORT.md",
+      "flushdb.py",
+      "main.py",
+      "models.py",
+      "requirements.txt"
+    ],
+    "manifests": [
+      {
+        "path": "requirements.txt",
+        "root_path": ".",
+        "kind": "python",
+        "dependencies": [
+          "annotated-types",
+          "anyio",
+          "cffi",
+          "click",
+          "cryptography",
+          "fastapi",
+          "h11",
+          "idna",
+          "pycparser",
+          "pydantic",
+          "pydantic-core",
+          "redis",
+          "sniffio",
+          "starlette",
+          "types-pyopenssl",
+          "types-redis",
+          "typing-extensions",
+          "uvicorn"
+        ],
+        "scripts": {},
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": null,
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {
+      "main.py": [
+        {
+          "name": "CODESPACE_NAME",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "path": "main.py",
+        "kind": "fastapi_instance",
+        "field": "app",
+        "confidence": 0.95,
+        "source": "deterministic"
+      }
+    ],
+    "warnings": [],
+    "input_fingerprint": "fd384737ce2ac34635cda2689dc77900d40f5aa9148a67dad7d6295689d8b34b",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "b75241e10f311061",
+      "name": "fastapi_microsoft",
+      "root_path": ".",
+      "role": "http_service",
+      "framework": "fastapi",
+      "language": "python",
+      "runtime": {
+        "language": "python",
+        "version": null,
+        "package_manager": "pip",
+        "dependency_files": [
+          "requirements.txt"
+        ],
+        "build_command": null,
+        "start_command": "uvicorn main:app",
+        "prerequisite_commands": [],
+        "command_source": "inferred",
+        "output_directory": null,
+        "workspace_root": null,
+        "lockfile_path": null
+      },
+      "config_requirements": [
+        {
+          "name": "CODESPACE_NAME",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        }
+      ],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "fastapi",
+        "root_path": ".",
+        "role_candidate": "http_service",
+        "evidence": [
+          {
+            "path": "requirements.txt",
+            "kind": "dependency",
+            "field": "fastapi",
+            "confidence": 0.8,
+            "source": "deterministic"
+          },
+          {
+            "path": "main.py",
+            "kind": "fastapi_instance",
+            "field": "app",
+            "confidence": 0.95,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": []
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [],
+  "unresolved_ambiguities": [],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}

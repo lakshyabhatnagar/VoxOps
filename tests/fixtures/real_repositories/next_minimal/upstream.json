@@ -1,0 +1,15 @@
+{
+  "repository": "guipas/nextjs-minimal-typescript-tailwind",
+  "revision": "31aab6fcf9d788b44cdde533ad0a17b8b84c25e6",
+  "frameworks": [
+    "nextjs"
+  ],
+  "roles": [
+    "server_rendered_web"
+  ],
+  "strategy": "native",
+  "source_bytes": 213551,
+  "archive_bytes": 84422,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "passed"
+}

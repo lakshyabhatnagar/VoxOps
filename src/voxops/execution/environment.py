@@ -18,6 +18,9 @@ from voxops.domain.execution_models import EnvEvidence, EnvFormSchema, EnvRequir
 from voxops.storage.artifact_store import digest
 
 
+# Read a supported local .env file and turn its entries into name/value pairs.
+# Check its size and file type, and refuse links or values that depend on substitution.
+# Also return file details so later calls can notice that someone changed it.
 def read_env_file(
     root: Path, relative: str, *, max_bytes: int = 65536
 ) -> tuple[dict[str, str], tuple[int, int, int, int] | None]:
@@ -87,6 +90,9 @@ def read_env_file(
             os.close(descriptor)
 
 
+# Check whether one configuration value is usable for this field.
+# Reject empty values, obvious placeholders, and values with unsafe line breaks.
+# For ports, numbers, switches, and URLs, check the expected format too.
 def _valid_value(item: EnvRequirement, value: str) -> bool:
     if not value.strip() or len(value) > item.max_length or any(c in value for c in "\x00\r\n"):
         return False
@@ -119,6 +125,9 @@ def _valid_value(item: EnvRequirement, value: str) -> bool:
     return True
 
 
+# Pick out the values that must be hidden from saved output.
+# Include secret and unknown fields, rather than assuming an unknown value is public.
+# Do not hide ordinary numeric or boolean defaults merely because their visibility is unknown.
 def _private_values(schema, values, default_ids=()):
     return {
         values[item.field_id]
@@ -134,9 +143,17 @@ def _private_values(schema, values, default_ids=()):
     }
 
 
+# Hold the actual configuration values in this Python process's memory.
+# For example, keep a submitted database password here while the saved form contains only its
+# name.
+# Provide the values to the right app and hide them when preparing output.
 class SecretSession:
     """Owns values only in process memory; never serialize this object."""
 
+    # Remember existing values and code defaults separately.
+    # Build the first set of strings to hide from output.
+    # Create random change markers so checks can detect replacement values without saving their
+    # contents.
     def __init__(
         self,
         schema: EnvFormSchema,
@@ -158,12 +175,21 @@ class SecretSession:
             for consumer in item.consumers
         }
 
+    # Return a harmless description when this object is printed.
+    # Do not include its stored passwords or other values.
+    # This avoids exposing configuration during ordinary Python debugging.
     def __repr__(self) -> str:
         return "<SecretSession redacted>"
 
+    # Refuse Python's attempt to serialize this session.
+    # The object holds real configuration values that belong only in memory.
+    # Raising an error prevents pickle from writing those values into a file.
     def __reduce__(self):
         raise TypeError("Secret sessions cannot be serialized")
 
+    # Check a complete candidate set before accepting any submitted changes.
+    # Make sure required values exist and that public fields do not contain private values.
+    # Only then replace the values and update change markers for the affected apps.
     def submit(self, values: Mapping[str, str]) -> None:
         fields = {item.field_id: item for item in self.schema.requirements}
         if set(values) - fields.keys() or any(not isinstance(v, str) for v in values.values()):
@@ -203,6 +229,9 @@ class SecretSession:
             self._values = candidate
             self.generation = uuid4().hex
 
+    # Replace known private values with a redaction marker in output text.
+    # Also cover escaped and multiline forms that can appear in diagnostic messages.
+    # Hide URL and token-shaped text as an additional check before output is retained.
     def redact(self, text: str) -> str:
         values = set(self._redactions)
         for value in self._redactions:
@@ -221,6 +250,9 @@ class SecretSession:
         )
         return re.sub(r"(?i)\b(?:bearer\s+|token[=:]\s*)[^\s,;]+", "[REDACTED TOKEN]", text)
 
+    # Return configuration for just one app, phase, and visibility group.
+    # A frontend build and an API process may need different values.
+    # This prevents each Docker operation from receiving every value in the session.
     def values_for(self, unit_id: str, phase: str, visibility: str) -> dict[str, str]:
         return {
             item.name: self._values[item.field_id]
@@ -230,9 +262,16 @@ class SecretSession:
             and any(c.unit_id == unit_id and c.phase == phase for c in item.consumers)
         }
 
+    # Check whether this session currently holds a value for one form field.
+    # Return only yes or no, without returning the value itself.
+    # The runner uses this when deciding whether required configuration is present.
     def contains(self, field_id: str) -> bool:
         return field_id in self._values
 
+    # Create a temporary file containing one app's runtime environment values.
+    # Restrict access to its directory and file while Docker reads it.
+    # Remove it when the surrounding operation finishes, including when that operation raises an
+    # error.
     @contextlib.contextmanager
     def runtime_file(self, unit_id: str) -> Iterator[Path]:
         values = {}
@@ -247,22 +286,36 @@ class SecretSession:
             yield path
 
 
+# Calculate a comparison code for the form's structure.
+# Leave out whether a field is currently supplied, missing, or defaulted.
+# Submitting values therefore does not make an otherwise unchanged form look like a different
+# form.
 def schema_digest(schema: EnvFormSchema) -> str:
     return digest(
         schema.model_dump(mode="json", exclude={"requirements": {"__all__": {"resolution"}}})
     )
 
 
+# Connect each saved execution run to its in-memory configuration session.
+# Read existing .env files, build forms, and accept missing values from the user.
+# When memory is lost, recover local values and defaults but not temporary user submissions.
 class EnvironmentManager:
     """Owns session authority for linked execution records in this process."""
 
-    def __init__(self):
+    # Start with no in-memory sessions.
+    # Sessions are indexed by run ID so different runs keep their values separate.
+    # A fresh manager must reconstruct local configuration before execution can continue.
+    def __init__(self, max_file_bytes: int = 1048576):
         self._sessions = {}
+        self.max_file_bytes = max_file_bytes
 
+    # Calculate a comparison code for the app sources used to discover configuration.
+    # Leave out generated deployment files unless the task edits application source.
+    # Changing app code can change its configuration needs, so old forms must be checked again.
     def source_digest(self, run, candidate_root: Path):
         from voxops.repository.snapshot import capture_source
 
-        _, inventory = capture_source(candidate_root, 131072)
+        _, inventory = capture_source(candidate_root, self.max_file_bytes)
         generated = {
             task.target_path
             for task in run.plan.tasks.values()
@@ -270,10 +323,17 @@ class EnvironmentManager:
         }
         return digest({key: value for key, value in inventory.items() if key not in generated})
 
+    # Ask the static scanner which environment names and defaults the app uses.
+    # Reject unusable defaults instead of silently treating them as working configuration.
+    # Keep private defaults available for redaction without putting their contents into the saved
+    # form.
     def _scan(self, run, candidate_root: Path):
         from voxops.execution.environment_analysis import Analyzer
 
-        analyzer = Analyzer(candidate_root, run.plan.units, self.source_digest(run, candidate_root))
+        analyzer = Analyzer(
+            candidate_root, run.plan.units, self.source_digest(run, candidate_root),
+            max_file_bytes=self.max_file_bytes,
+        )
         schema, defaults = analyzer.scan()
         known_defaults = dict(defaults)
         for item in schema.requirements:
@@ -290,6 +350,10 @@ class EnvironmentManager:
                 )
         return schema, defaults, known_defaults, analyzer.extra_defaults
 
+    # Build the first environment form and in-memory session for a run.
+    # Combine discovered defaults with valid values from the original repository's local files.
+    # If a form already exists, use the refresh path instead of starting another unrelated
+    # session.
     def prepare(self, run, candidate_root: Path, source_root: Path):
         execution = run.execution
         if execution is None:
@@ -316,6 +380,9 @@ class EnvironmentManager:
         )
         return {"schema": schema, "schema_digest": schema_digest(schema)}
 
+    # Read each scope's selected .env files in their configured order.
+    # Match names using the case rules discovered for each field, and keep only valid values.
+    # Return file versions too so edits to local configuration can invalidate old checks.
     def _local_values(self, schema, source_root):
         values, versions = {}, {}
         for scope in sorted({item.scope for item in schema.requirements}):
@@ -338,6 +405,9 @@ class EnvironmentManager:
                     values[item.field_id] = lookup[name]
         return values, versions
 
+    # Check that a public value does not contain a known private value.
+    # For example, a frontend URL must not include a submitted secret.
+    # Reject the configuration before those public values can be passed into a build.
     @staticmethod
     def _reject_public_leaks(schema, values, default_ids=()):
         private = _private_values(schema, values, default_ids)
@@ -351,6 +421,11 @@ class EnvironmentManager:
                 "invalid_env_values", "Public configuration contains private values.", 409
             )
 
+    # Refresh a saved form against the current files and in-memory session.
+    # If local files changed, replace the session and invalidate verification that used the old
+    # values.
+    # If the session was lost, reread local values and defaults while leaving user-only secrets
+    # missing.
     def form(self, run, source_root: Path, candidate_root: Path):
         execution = run.execution
         if execution is None or not execution.env_schema.scan_id:
@@ -441,6 +516,9 @@ class EnvironmentManager:
             )
         return {"schema": schema, "schema_digest": schema_digest(schema)}
 
+    # Refresh the form before accepting the user's values.
+    # Reject an outdated form or invalid submission before altering the session.
+    # Mark accepted fields as supplied and invalidate results that used different configuration.
     def submit(
         self,
         run,
@@ -472,9 +550,17 @@ class EnvironmentManager:
         self._sessions[run.run_id] = record
         return self.form(run, source_root, candidate_root)
 
+    # Forget the in-memory session for one run.
+    # This discards temporary user-entered values without writing them anywhere.
+    # A later refresh can recover local files and code defaults, but must request lost user values
+    # again.
     def clear(self, run_id: str) -> None:
         self._sessions.pop(run_id, None)
 
+    # Confirm that this run has a current session and no unresolved required configuration.
+    # Optionally compare the expected change markers with the current ones.
+    # The execution and publication paths use this to reject results tied to lost or changed
+    # values.
     def authority(self, run, source_root: Path, candidate_root: Path, expected_generation=None):
         """Caller owns the project lock and persists any invalidation on exit."""
         self.form(run, source_root, candidate_root)
@@ -494,6 +580,9 @@ class EnvironmentManager:
             raise AppError("env_session_changed", "Environment configuration changed.", 409)
         return session
 
+    # Retrieve a session only if its run, execution ID, and form still match.
+    # Attach the run's current form object so field states are up to date.
+    # If memory was lost or belongs to an older execution, require configuration recovery instead.
     def session(self, run):
         record = self._sessions.get(run.run_id)
         if (
@@ -505,6 +594,10 @@ class EnvironmentManager:
         record[2].schema = run.execution.env_schema
         return record[2]
 
+    # Clear the saved verification result and any final publication review and approval.
+    # Move the run back to configuration checking when old values are no longer trustworthy.
+    # This prevents a branch from being published using checks performed with different
+    # configuration.
     @staticmethod
     def _invalidate(run):
         run.execution.attestation = None

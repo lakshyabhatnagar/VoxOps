@@ -1,0 +1,204 @@
+{
+  "plan": {
+    "schema_version": "1",
+    "plan_id": "7be403c1d0af4e849653b54d2dbf8c47",
+    "revision": 1,
+    "scan_id": "541df84e50e54197b9f55c327f531742",
+    "repo_fingerprint": "0ad0c7f87316744545c6c314",
+    "source_input_fingerprint": "fd384737ce2ac34635cda2689dc77900d40f5aa9148a67dad7d6295689d8b34b",
+    "strategy_by_unit": {
+      "b75241e10f311061": "container"
+    },
+    "units": [
+      {
+        "id": "b75241e10f311061",
+        "name": "fastapi_microsoft",
+        "root_path": ".",
+        "role": "http_service",
+        "framework": "fastapi",
+        "language": "python",
+        "runtime": {
+          "language": "python",
+          "version": null,
+          "package_manager": "pip",
+          "dependency_files": [
+            "requirements.txt"
+          ],
+          "build_command": null,
+          "start_command": "uvicorn main:app",
+          "prerequisite_commands": [],
+          "command_source": "inferred",
+          "output_directory": null,
+          "workspace_root": null,
+          "lockfile_path": null
+        },
+        "config_requirements": [
+          {
+            "name": "CODESPACE_NAME",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "referenced"
+          },
+          {
+            "name": "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "referenced"
+          }
+        ],
+        "dependency_candidates": [],
+        "shared_packages": [],
+        "detection": {
+          "framework": "fastapi",
+          "root_path": ".",
+          "role_candidate": "http_service",
+          "evidence": [
+            {
+              "path": "requirements.txt",
+              "kind": "dependency",
+              "field": "fastapi",
+              "confidence": 0.8,
+              "source": "deterministic"
+            },
+            {
+              "path": "main.py",
+              "kind": "fastapi_instance",
+              "field": "app",
+              "confidence": 0.95,
+              "source": "deterministic"
+            }
+          ],
+          "confidence": 0.95,
+          "unresolved_questions": []
+        }
+      }
+    ],
+    "tasks": {
+      "docker-b75241e10f311061": {
+        "task_id": "docker-b75241e10f311061",
+        "unit_id": "b75241e10f311061",
+        "artifact_type": "dockerfile",
+        "target_path": "Dockerfile",
+        "operation": "create",
+        "depends_on": [],
+        "strategy": "container",
+        "build_context": ".",
+        "required_paths": [
+          "flushdb.py",
+          "main.py",
+          "models.py",
+          "requirements.txt"
+        ],
+        "expected_commands": [
+          "uvicorn main:app"
+        ],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "Container strategy requires an explicit build and runtime definition.",
+        "evidence": [
+          "requirements.txt",
+          "main.py"
+        ],
+        "approval_class": "artifact"
+      },
+      "dockerignore": {
+        "task_id": "dockerignore",
+        "unit_id": null,
+        "artifact_type": "dockerignore",
+        "target_path": ".dockerignore",
+        "operation": "create",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "flushdb.py",
+          "main.py",
+          "models.py",
+          "requirements.txt"
+        ],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "A single root build context includes inherited locks and shared packages.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "gitignore": {
+        "task_id": "gitignore",
+        "unit_id": null,
+        "artifact_type": "gitignore",
+        "target_path": ".gitignore",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "flushdb.py",
+          "main.py",
+          "models.py",
+          "requirements.txt"
+        ],
+        "expected_commands": [],
+        "existing_hash": "dbca5a9db869b79baf85435a2ab5f5ed8a70d39ff1448f6d9ac6ed7798657750",
+        "max_attempts": 3,
+        "reason": "Exclude local credentials and generated dependencies from publication.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "ci": {
+        "task_id": "ci",
+        "unit_id": null,
+        "artifact_type": "ci",
+        "target_path": ".github/workflows/ci.yml",
+        "operation": "create",
+        "depends_on": [
+          "docker-b75241e10f311061",
+          "dockerignore"
+        ],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "Dockerfile"
+        ],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "One build/test workflow covers the detected units without cloud deployment.",
+        "evidence": [
+          "requirements.txt"
+        ],
+        "approval_class": "artifact"
+      },
+      "provider": {
+        "task_id": "provider",
+        "unit_id": null,
+        "artifact_type": "provider",
+        "target_path": "voxops-provider.json",
+        "operation": "skip",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "No provider target selected; no provider configuration needed.",
+        "evidence": [],
+        "approval_class": "artifact"
+      }
+    },
+    "warnings": [
+      "Static validation does not prove a build, running app, or GitHub CI success."
+    ],
+    "unresolved_questions": [],
+    "provider": null
+  },
+  "files": {
+    "Dockerfile": "# syntax=docker/dockerfile:1\nFROM python:3.11-slim\n\n# Run as a non-root user\nRUN useradd --create-home --uid 1000 appuser\n\nWORKDIR /app\n\n# Install dependencies first for better layer caching\nCOPY requirements.txt .\nRUN pip install --no-cache-dir --upgrade pip \\\n    && pip install --no-cache-dir -r requirements.txt\n\n# Copy application source\nCOPY main.py models.py flushdb.py ./\n\nUSER appuser\n\nEXPOSE 8000\n\nCMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n",
+    ".dockerignore": ".env\n.env.*\n.git/\n*.pem\n*.key\nnode_modules/\n.venv/\n",
+    ".gitignore": "# Byte-compiled / optimized / DLL files\n__pycache__/\n*.py[cod]\n*$py.class\n\n# C extensions\n*.so\n\n# Distribution / packaging\n.Python\nbuild/\ndevelop-eggs/\ndist/\ndownloads/\neggs/\n.eggs/\nlib/\nlib64/\nparts/\nsdist/\nvar/\nwheels/\n*.egg-info/\n.installed.cfg\n*.egg\nMANIFEST\n\n# PyInstaller\n#  Usually these files are written by a python script from a template\n#  before PyInstaller builds the exe, so as to inject date/other infos into it.\n*.manifest\n*.spec\n\n# Installer logs\npip-log.txt\npip-delete-this-directory.txt\n\n# Unit test / coverage reports\nhtmlcov/\n.tox/\n.coverage\n.coverage.*\n.cache\nnosetests.xml\ncoverage.xml\n*.cover\n.hypothesis/\n.pytest_cache/\n\n# Translations\n*.mo\n*.pot\n\n# Django stuff:\n*.log\nlocal_settings.py\ndb.sqlite3\n\n# Flask stuff:\ninstance/\n.webassets-cache\n\n# Scrapy stuff:\n.scrapy\n\n# Sphinx documentation\ndocs/_build/\n\n# PyBuilder\ntarget/\n\n# Jupyter Notebook\n.ipynb_checkpoints\n\n# pyenv\n.python-version\n\n# celery beat schedule file\ncelerybeat-schedule\n\n# SageMath parsed files\n*.sage.py\n\n# Environments\n.env\n.venv\nenv/\nvenv/\nENV/\nenv.bak/\nvenv.bak/\n\n# Spyder project settings\n.spyderproject\n.spyproject\n\n# Rope project settings\n.ropeproject\n\n# mkdocs documentation\n/site\n\n# mypy\n.mypy_cache/\n\nsettings.json\n.env.*\n!.env.example\n.git/\n*.pem\n*.key\n",
+    ".github/workflows/ci.yml": "name: build\non: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n      - run: python -m compileall main.py\n"
+  }
+}

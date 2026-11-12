@@ -1,0 +1,246 @@
+{
+  "plan": {
+    "schema_version": "1",
+    "plan_id": "75beeb751db14b948534c595b1d70129",
+    "revision": 1,
+    "scan_id": "b454a422f0194e8ca019b95e1c3b03b2",
+    "repo_fingerprint": "29b33dfc631e2047ae8d9ccd",
+    "source_input_fingerprint": "6a4a8c19d957e57a76daf34e18b37e5ee0321137931517909644902986abe45f",
+    "strategy_by_unit": {
+      "781cdbbf51a2396c": "native"
+    },
+    "units": [
+      {
+        "id": "781cdbbf51a2396c",
+        "name": "next_database",
+        "root_path": ".",
+        "role": "fullstack_web",
+        "framework": "nextjs",
+        "language": "javascript",
+        "runtime": {
+          "language": "javascript",
+          "version": null,
+          "package_manager": "pnpm",
+          "dependency_files": [
+            "package.json"
+          ],
+          "build_command": "pnpm run build",
+          "start_command": "pnpm run start",
+          "prerequisite_commands": [],
+          "command_source": "explicit",
+          "output_directory": null,
+          "workspace_root": null,
+          "lockfile_path": "pnpm-lock.yaml"
+        },
+        "config_requirements": [
+          {
+            "name": "AUTH_GITHUB_ID",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "example_only"
+          },
+          {
+            "name": "AUTH_GITHUB_SECRET",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "secret",
+            "presence": "example_only"
+          },
+          {
+            "name": "AUTH_SECRET",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "secret",
+            "presence": "example_only"
+          },
+          {
+            "name": "NEXTAUTH_URL",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "example_only"
+          },
+          {
+            "name": "POSTGRES_URL",
+            "necessity": "unknown",
+            "stage": "runtime",
+            "visibility": "unknown",
+            "presence": "example_only"
+          }
+        ],
+        "dependency_candidates": [],
+        "shared_packages": [],
+        "detection": {
+          "framework": "nextjs",
+          "root_path": ".",
+          "role_candidate": "fullstack_web",
+          "evidence": [
+            {
+              "path": "package.json",
+              "kind": "dependency",
+              "field": "next",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "app/(dashboard)/actions.ts",
+              "kind": "next_action",
+              "field": "server action",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "app/(dashboard)/user.tsx",
+              "kind": "next_action",
+              "field": "server action",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "app/api/auth/[...nextauth]/route.ts",
+              "kind": "next_api",
+              "field": "API route file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "app/api/seed/route.ts",
+              "kind": "next_api",
+              "field": "API route file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "app/login/page.tsx",
+              "kind": "next_action",
+              "field": "server action",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "lib/db.ts",
+              "kind": "next_server",
+              "field": "server-only capability",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "middleware.ts",
+              "kind": "next_server",
+              "field": "middleware file",
+              "confidence": 0.95,
+              "source": "deterministic"
+            }
+          ],
+          "confidence": 0.95,
+          "unresolved_questions": []
+        }
+      }
+    ],
+    "tasks": {
+      "gitignore": {
+        "task_id": "gitignore",
+        "unit_id": null,
+        "artifact_type": "gitignore",
+        "target_path": ".gitignore",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "app/(dashboard)/actions.ts",
+          "app/(dashboard)/customers/page.tsx",
+          "app/(dashboard)/error.tsx",
+          "app/(dashboard)/layout.tsx",
+          "app/(dashboard)/nav-item.tsx",
+          "app/(dashboard)/page.tsx",
+          "app/(dashboard)/product.tsx",
+          "app/(dashboard)/products-table.tsx",
+          "app/(dashboard)/providers.tsx",
+          "app/(dashboard)/search.tsx",
+          "app/(dashboard)/user.tsx",
+          "app/api/auth/[...nextauth]/route.ts",
+          "app/api/seed/route.ts",
+          "app/globals.css",
+          "app/layout.tsx",
+          "app/login/page.tsx",
+          "components/icons.tsx",
+          "components/ui/badge.tsx",
+          "components/ui/breadcrumb.tsx",
+          "components/ui/button.tsx",
+          "components/ui/card.tsx",
+          "components/ui/dropdown-menu.tsx",
+          "components/ui/input.tsx",
+          "components/ui/sheet.tsx",
+          "components/ui/table.tsx",
+          "components/ui/tabs.tsx",
+          "components/ui/tooltip.tsx",
+          "lib/auth.ts",
+          "lib/db.ts",
+          "lib/utils.ts",
+          "middleware.ts",
+          "next.config.ts",
+          "package.json",
+          "pnpm-lock.yaml",
+          "postcss.config.js",
+          "tailwind.config.ts"
+        ],
+        "expected_commands": [],
+        "existing_hash": "ffa17d15c68f722386bafc9259653355693a75fe7fa1a07136f4ce47146bfcef",
+        "max_attempts": 3,
+        "reason": "Exclude local credentials and generated dependencies from publication.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "ci": {
+        "task_id": "ci",
+        "unit_id": null,
+        "artifact_type": "ci",
+        "target_path": ".github/workflows/ci.yml",
+        "operation": "create",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [
+          "pnpm run build"
+        ],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "One build/test workflow covers the detected units without cloud deployment.",
+        "evidence": [
+          "package.json"
+        ],
+        "approval_class": "artifact"
+      },
+      "provider": {
+        "task_id": "provider",
+        "unit_id": null,
+        "artifact_type": "provider",
+        "target_path": "voxops-provider.json",
+        "operation": "skip",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "No provider target selected; no provider configuration needed.",
+        "evidence": [],
+        "approval_class": "artifact"
+      }
+    },
+    "warnings": [
+      "Static validation does not prove a build, running app, or GitHub CI success."
+    ],
+    "unresolved_questions": [],
+    "provider": null
+  },
+  "files": {
+    ".gitignore": "# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.\n\n# dependencies\n/node_modules\n/.pnp\n.pnp.js\n\n# testing\n/coverage\n\n# next.js\n/.next/\n/out/\n\n# production\n/build\n\n# misc\n.DS_Store\n*.pem\n\n# debug\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\n.pnpm-debug.log*\n\n# env files\n.env*\n!.env.example\n\n# vercel\n.vercel\n\n# typescript\n*.tsbuildinfo\nnext-env.d.ts\n.env\n.env.*\n.git/\n*.key\n",
+    ".github/workflows/ci.yml": "name: build\non: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n      - run: pnpm run build\n"
+  },
+  "rejected_ci": "name: build\non: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd6f7d6820020\n      - run: pnpm run build\n"
+}

@@ -1,0 +1,201 @@
+{
+  "plan": {
+    "schema_version": "1",
+    "plan_id": "61c058c8354644a99121370e079fe544",
+    "revision": 1,
+    "scan_id": "6c753e0c8b0045c0b8a69e71b9c29ec9",
+    "repo_fingerprint": "548f927bbae7cff2dff0ca36",
+    "source_input_fingerprint": "11e3323b3575cb48ea0915553b8a11f4f1929378b92e66641affb85e2a18af65",
+    "strategy_by_unit": {
+      "1340fa1d12e310f3": "static"
+    },
+    "units": [
+      {
+        "id": "1340fa1d12e310f3",
+        "name": "vite_typescript",
+        "root_path": ".",
+        "role": "static_frontend",
+        "framework": "react_vite",
+        "language": "javascript",
+        "runtime": {
+          "language": "javascript",
+          "version": null,
+          "package_manager": "npm",
+          "dependency_files": [
+            "package.json"
+          ],
+          "build_command": "npm run build",
+          "start_command": null,
+          "prerequisite_commands": [],
+          "command_source": "explicit",
+          "output_directory": "dist",
+          "workspace_root": null,
+          "lockfile_path": "package-lock.json"
+        },
+        "config_requirements": [
+          {
+            "name": "DEV",
+            "necessity": "unknown",
+            "stage": "unknown",
+            "visibility": "unknown",
+            "presence": "referenced"
+          },
+          {
+            "name": "MODE",
+            "necessity": "unknown",
+            "stage": "unknown",
+            "visibility": "unknown",
+            "presence": "referenced"
+          },
+          {
+            "name": "PROD",
+            "necessity": "unknown",
+            "stage": "unknown",
+            "visibility": "unknown",
+            "presence": "referenced"
+          },
+          {
+            "name": "SSR",
+            "necessity": "unknown",
+            "stage": "unknown",
+            "visibility": "unknown",
+            "presence": "referenced"
+          },
+          {
+            "name": "STRING_EXAMPLE",
+            "necessity": "unknown",
+            "stage": "unknown",
+            "visibility": "unknown",
+            "presence": "present"
+          },
+          {
+            "name": "VITE_API_URL",
+            "necessity": "unknown",
+            "stage": "build_time",
+            "visibility": "public",
+            "presence": "present"
+          },
+          {
+            "name": "VITE_APP_VERSION",
+            "necessity": "unknown",
+            "stage": "build_time",
+            "visibility": "public",
+            "presence": "present"
+          },
+          {
+            "name": "VITE_STRING_EXAMPLE",
+            "necessity": "unknown",
+            "stage": "build_time",
+            "visibility": "public",
+            "presence": "present"
+          }
+        ],
+        "dependency_candidates": [],
+        "shared_packages": [],
+        "detection": {
+          "framework": "react_vite",
+          "root_path": ".",
+          "role_candidate": "static_frontend",
+          "evidence": [
+            {
+              "path": "package.json",
+              "kind": "dependency",
+              "field": "react + vite",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "vite.config.ts",
+              "kind": "config",
+              "field": "Vite config",
+              "confidence": 0.9,
+              "source": "deterministic"
+            }
+          ],
+          "confidence": 0.95,
+          "unresolved_questions": []
+        }
+      }
+    ],
+    "tasks": {
+      "gitignore": {
+        "task_id": "gitignore",
+        "unit_id": null,
+        "artifact_type": "gitignore",
+        "target_path": ".gitignore",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "eslint.config.js",
+          "index.html",
+          "package-lock.json",
+          "package.json",
+          "src/App.css",
+          "src/App.tsx",
+          "src/components/EnvVariables.tsx",
+          "src/index.css",
+          "src/main.tsx",
+          "src/pages/About.tsx",
+          "src/pages/Home.tsx",
+          "src/vite-env.d.ts",
+          "vite.config.ts"
+        ],
+        "expected_commands": [],
+        "existing_hash": "b263f698f594f73a424eed941078fdba1428351d946e45052381e836ef5072f5",
+        "max_attempts": 3,
+        "reason": "Exclude local credentials and generated dependencies from publication.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "ci": {
+        "task_id": "ci",
+        "unit_id": null,
+        "artifact_type": "ci",
+        "target_path": ".github/workflows/ci.yml",
+        "operation": "create",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [
+          "npm run build"
+        ],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "One build/test workflow covers the detected units without cloud deployment.",
+        "evidence": [
+          "package.json"
+        ],
+        "approval_class": "artifact"
+      },
+      "provider": {
+        "task_id": "provider",
+        "unit_id": null,
+        "artifact_type": "provider",
+        "target_path": "voxops-provider.json",
+        "operation": "skip",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "No provider target selected; no provider configuration needed.",
+        "evidence": [],
+        "approval_class": "artifact"
+      }
+    },
+    "warnings": [
+      "Static validation does not prove a build, running app, or GitHub CI success."
+    ],
+    "unresolved_questions": [],
+    "provider": null
+  },
+  "files": {
+    ".gitignore": "# Logs\nlogs\n*.log\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\npnpm-debug.log*\nlerna-debug.log*\n\nnode_modules\ndist\ndist-ssr\n*.local\n\n# Editor directories and files\n# .vscode/*\n# !.vscode/extensions.json\n.idea\n.DS_Store\n*.suo\n*.ntvs*\n*.njsproj\n*.sln\n*.sw?\n.env\n.env.*\n!.env.example\n.git/\n*.pem\n*.key\n",
+    ".github/workflows/ci.yml": "name: CI\n\non:\n  push:\n    branches: [main, master]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Checkout repository\n        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n\n      - name: Set up Node.js\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: 20\n          cache: npm\n\n      - name: Install dependencies\n        run: npm ci\n\n      - name: Build\n        run: npm run build\n"
+  }
+}

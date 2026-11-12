@@ -1,0 +1,333 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "e075930cd8c04088b0c70634b262ccff",
+    "scanned_at": "2026-11-12T14:29:41.978854Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "6b79607b3ef95ab473528597",
+    "display_name": "fastapi_package",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".gitignore",
+      "Dockerfile",
+      "README.md",
+      "__init__.py",
+      "fastapi_example/__init__.py",
+      "fastapi_example/api/__init__.py",
+      "fastapi_example/api/errors/__init__.py",
+      "fastapi_example/api/errors/http_error.py",
+      "fastapi_example/api/group_routers.py",
+      "fastapi_example/api/middlewares/__init__.py",
+      "fastapi_example/api/middlewares/try_except_middleware.py",
+      "fastapi_example/api/middlewares/useful_headers_middleware.py",
+      "fastapi_example/api/routes/__init__.py",
+      "fastapi_example/api/routes/bad_route.py",
+      "fastapi_example/api/routes/health.py",
+      "fastapi_example/api/routes/info.py",
+      "fastapi_example/api/routes/post_example.py",
+      "fastapi_example/api/routes/root.py",
+      "fastapi_example/api/routes/sleep.py",
+      "fastapi_example/config.py",
+      "fastapi_example/core/__init__.py",
+      "fastapi_example/core/events.py",
+      "fastapi_example/logging/custom_formatter.py",
+      "fastapi_example/logging/utils.py",
+      "fastapi_example/main.py",
+      "fastapi_example/utils/__init__.py",
+      "fastapi_example/utils/info.py",
+      "requirements.txt",
+      "tests/__init__.py",
+      "tests/test_api/__init__.py",
+      "tests/test_api/test_routes/__init__.py",
+      "tests/test_api/test_routes/test_bad_route.py",
+      "tests/test_api/test_routes/test_health.py",
+      "tests/test_api/test_routes/test_info.py",
+      "tests/test_api/test_routes/test_post_example.py",
+      "tests/test_api/test_routes/test_root.py",
+      "tests/test_api/test_routes/test_sleep.py",
+      "tests/test_core/__init__.py",
+      "tests/test_core/test_events.py",
+      "tests/test_logging/__init__.py",
+      "tests/test_logging/test_custom_formatter.py",
+      "tests/test_logging/test_utils/__init__.py",
+      "tests/test_logging/test_utils/test_filter.py",
+      "tests/test_main.py",
+      "tests/test_structure/__init__.py",
+      "tests/test_structure/test_requirements.py",
+      "tests/test_structure/test_requirements_dev.py",
+      "tests/test_structure/test_style.py"
+    ],
+    "shallow_tree": [
+      ".gitignore",
+      "Dockerfile",
+      "Makefile",
+      "README.md",
+      "__init__.py",
+      "fastapi_example/__init__.py",
+      "fastapi_example/api/__init__.py",
+      "fastapi_example/api/errors/__init__.py",
+      "fastapi_example/api/errors/http_error.py",
+      "fastapi_example/api/group_routers.py",
+      "fastapi_example/api/middlewares/__init__.py",
+      "fastapi_example/api/middlewares/try_except_middleware.py",
+      "fastapi_example/api/middlewares/useful_headers_middleware.py",
+      "fastapi_example/api/routes/__init__.py",
+      "fastapi_example/api/routes/bad_route.py",
+      "fastapi_example/api/routes/health.py",
+      "fastapi_example/api/routes/info.py",
+      "fastapi_example/api/routes/post_example.py",
+      "fastapi_example/api/routes/root.py",
+      "fastapi_example/api/routes/sleep.py",
+      "fastapi_example/config.py",
+      "fastapi_example/core/__init__.py",
+      "fastapi_example/core/events.py",
+      "fastapi_example/logging/conf.yaml",
+      "fastapi_example/logging/custom_formatter.py",
+      "fastapi_example/logging/utils.py",
+      "fastapi_example/main.py",
+      "fastapi_example/utils/__init__.py",
+      "fastapi_example/utils/info.py",
+      "pytest.ini",
+      "requirements.in",
+      "requirements.txt",
+      "ruff.toml",
+      "tests/__init__.py",
+      "tests/dev_requirements.in",
+      "tests/dev_requirements.txt",
+      "tests/test_api/__init__.py",
+      "tests/test_api/test_routes/__init__.py",
+      "tests/test_api/test_routes/test_bad_route.py",
+      "tests/test_api/test_routes/test_health.py",
+      "tests/test_api/test_routes/test_info.py",
+      "tests/test_api/test_routes/test_post_example.py",
+      "tests/test_api/test_routes/test_root.py",
+      "tests/test_api/test_routes/test_sleep.py",
+      "tests/test_core/__init__.py",
+      "tests/test_core/test_events.py",
+      "tests/test_logging/__init__.py",
+      "tests/test_logging/test_custom_formatter.py",
+      "tests/test_logging/test_utils/__init__.py",
+      "tests/test_logging/test_utils/test_filter.py",
+      "tests/test_main.py",
+      "tests/test_structure/__init__.py",
+      "tests/test_structure/test_requirements.py",
+      "tests/test_structure/test_requirements_dev.py",
+      "tests/test_structure/test_style.py"
+    ],
+    "manifests": [
+      {
+        "path": "requirements.txt",
+        "root_path": ".",
+        "kind": "python",
+        "dependencies": [
+          "annotated-types",
+          "anyio",
+          "certifi",
+          "click",
+          "dnspython",
+          "email-validator",
+          "fastapi",
+          "fastapi-cli",
+          "fastapi-profiler",
+          "h11",
+          "httpcore",
+          "httptools",
+          "httpx",
+          "idna",
+          "jinja2",
+          "markdown-it-py",
+          "markupsafe",
+          "mdurl",
+          "orjson",
+          "pydantic",
+          "pydantic-core",
+          "pydantic-settings",
+          "pygments",
+          "pyinstrument",
+          "python-dotenv",
+          "python-json-logger",
+          "python-multipart",
+          "pyyaml",
+          "rich",
+          "shellingham",
+          "sniffio",
+          "starlette",
+          "typer",
+          "typing-extensions",
+          "ujson",
+          "uvicorn",
+          "uvloop",
+          "watchfiles",
+          "websockets"
+        ],
+        "scripts": {},
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": null,
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {
+      "fastapi_example/utils/info.py": [
+        {
+          "name": "BUILD_ID",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "BUILD_NUMBER",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "BUILD_URL",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "GIT_COMMIT",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "path": "fastapi_example/main.py",
+        "kind": "fastapi_factory",
+        "field": "get_application",
+        "confidence": 0.95,
+        "source": "deterministic"
+      },
+      {
+        "path": "fastapi_example/main.py",
+        "kind": "fastapi_instance",
+        "field": "app",
+        "confidence": 0.95,
+        "source": "deterministic"
+      }
+    ],
+    "warnings": [],
+    "input_fingerprint": "666bb28e63d8b75aba838fe37a77b431f859c685be77c571bb832a52736cd6eb",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "b75241e10f311061",
+      "name": "fastapi_package",
+      "root_path": ".",
+      "role": "http_service",
+      "framework": "fastapi",
+      "language": "python",
+      "runtime": {
+        "language": "python",
+        "version": null,
+        "package_manager": "pip",
+        "dependency_files": [
+          "requirements.txt"
+        ],
+        "build_command": null,
+        "start_command": "uvicorn fastapi_example.main:app",
+        "prerequisite_commands": [],
+        "command_source": "inferred",
+        "output_directory": null,
+        "workspace_root": null,
+        "lockfile_path": null
+      },
+      "config_requirements": [
+        {
+          "name": "BUILD_ID",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "BUILD_NUMBER",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "BUILD_URL",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "GIT_COMMIT",
+          "necessity": "unknown",
+          "stage": "runtime",
+          "visibility": "unknown",
+          "presence": "referenced"
+        }
+      ],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "fastapi",
+        "root_path": ".",
+        "role_candidate": "http_service",
+        "evidence": [
+          {
+            "path": "requirements.txt",
+            "kind": "dependency",
+            "field": "fastapi",
+            "confidence": 0.8,
+            "source": "deterministic"
+          },
+          {
+            "path": "fastapi_example/main.py",
+            "kind": "fastapi_factory",
+            "field": "get_application",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "fastapi_example/main.py",
+            "kind": "fastapi_instance",
+            "field": "app",
+            "confidence": 0.95,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": []
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [],
+  "unresolved_ambiguities": [],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}

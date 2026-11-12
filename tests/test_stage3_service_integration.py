@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -25,9 +26,11 @@ from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
 
-def integration_fixture(tmp_path):
+def integration_fixture(tmp_path, *, large_lockfile=False):
     source = copy_fixture(tmp_path, "vite_only")
     (source / ".env.example").unlink()
+    if large_lockfile:
+        (source / "pnpm-lock.yaml").write_text("lockfileVersion: 9.0\n# " + "x" * 187294)
     (source / "config.js").write_text(
         'if (!process.env.VITE_REQUIRED) throw new Error("required");\n'
     )
@@ -86,8 +89,9 @@ def integration_fixture(tmp_path):
     return service, run, bare
 
 
-def test_api_environment_verification_review_and_local_push(tmp_path):
-    service, run, bare = integration_fixture(tmp_path)
+@pytest.mark.parametrize("large_lockfile", [False, True])
+def test_api_environment_verification_review_and_local_push(tmp_path, large_lockfile):
+    service, run, bare = integration_fixture(tmp_path, large_lockfile=large_lockfile)
     app = create_app(service.settings)
     app.state.artifacts = service
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
@@ -122,6 +126,9 @@ def test_api_environment_verification_review_and_local_push(tmp_path):
         )
         result = request("POST", "/execute")
         assert result["execution"]["status"] == "passed", result["errors"]
+        premature = client.post(prefix + "/publish")
+        assert premature.status_code == 409
+        assert service.store.load_run(run.run_id).errors == ["approval_required"]
         review = request("GET", "/review")["review"]
         request(
             "POST",
@@ -135,6 +142,8 @@ def test_api_environment_verification_review_and_local_push(tmp_path):
         published = request("POST", "/publish")
         assert published["result"]["remote_sha"] == published["result"]["commit_sha"]
         assert published["result"]["deployment_executed"] is False
+        assert published["errors"] == []
+        assert "Resolved earlier error: approval_required" in published["warnings"]
         assert "synthetic-secret-value" not in str(published)
         assert (
             git(bare, "rev-parse", f"refs/heads/{run.branch}").decode().strip()
@@ -251,3 +260,65 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
         result = published.json()["result"]
         assert result["verification_status"] == "verification_incomplete"
         assert git(bare, "rev-parse", result["branch"]).decode().strip() == result["remote_sha"]
+
+
+@pytest.mark.parametrize("repair_succeeds", [True, False])
+def test_model_usage_includes_successful_and_failed_repairs(tmp_path, repair_succeeds):
+    """Count every model request made while trying to repair a build.
+
+    The saved attempt records include calls even when a correction fails.
+    The API run summary must report those same request and token totals.
+    """
+    from demo_stage3 import fixture_agent
+
+    async def exercise():
+        app, source, _ = demo_app(tmp_path, bootstrap=True)
+        service = app.state.artifacts
+        calls = []
+        service.generator.agent = fixture_agent(calls)
+
+        class RepairDocker(DemoDocker):
+            async def build(self, builder, context, dockerfile, session, unit):
+                if "missing_application.py" in (context.path / dockerfile).read_text():
+                    raise AppError("BUILD_FAILED", "COPY checksum not found", 409)
+                return await super().build(builder, context, dockerfile, session, unit)
+
+        service.driver_factory = lambda unit, journal, cancel, session: RepairDocker(
+            service.settings, journal, cancel, session
+        )
+        analysis = await service.analysis.analyze(str(source))
+        plan = await service.plan(str(source), {analysis.detected_units[0].id: "container"})
+        run = await service.start(
+            plan.plan_id, "example", "project", list(capture_source(source)[1])
+        )
+        review = max(run.reviews.values(), key=lambda item: item.created_at)
+        service.approve(run.run_id, review.review_id, review.digest, "approve")
+        if not repair_succeeds:
+            original = service.generator.agent
+
+            original_run = original.run
+
+            async def respond(prompt, **kwargs):
+                if json.loads(prompt).get("execution_feedback"):
+                    raise AppError(
+                        "model_failed", "Fixture model cannot produce a correction.", 409
+                    )
+                return await original_run(prompt, **kwargs)
+
+            original.run = respond
+        result = await service.execute(run.run_id)
+        attempts = [
+            attempt
+            for task in result.plan.tasks.values()
+            for attempt in service.generator.previous(result.run_id, task).attempts
+        ]
+        assert len(attempts) > 4
+        assert result.execution.status == ("passed" if repair_succeeds else "failed")
+        for counter in ("requests", "input_tokens", "output_tokens"):
+            assert getattr(result.model_usage, counter) == sum(
+                getattr(attempt.usage, counter) for attempt in attempts
+            )
+        saved = service.store.load_run(result.run_id)
+        assert saved.model_usage == result.model_usage
+
+    asyncio.run(exercise())

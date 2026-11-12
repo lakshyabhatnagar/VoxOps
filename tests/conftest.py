@@ -60,3 +60,11 @@ def committed_repo(tmp_path: Path) -> Path:
 # Apply any extra settings supplied by the test.
 def settings_for(tmp_path: Path, **overrides) -> Settings:
     return Settings(allowed_roots=[tmp_path], data_dir=tmp_path / "records", **overrides)
+
+
+# Choose whether the pinned-repository cases start from detection or a saved checkpoint.
+# Other tests ignore these options and keep their existing behavior.
+# Real Docker is opt-in because it builds upstream code and can download dependencies.
+def pytest_addoption(parser):
+    parser.addoption("--repo-stage", choices=["all", "1", "2", "3"], default="all")
+    parser.addoption("--repo-real-docker", action="store_true", default=False)

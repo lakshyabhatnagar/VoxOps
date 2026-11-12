@@ -13,10 +13,11 @@ class Settings(BaseSettings):
     data_dir: Path = Path(".voxops")
     max_depth: int = Field(default=8, ge=1, le=20)
     max_files: int = Field(default=3000, ge=1, le=20000)
-    max_file_bytes: int = Field(default=131072, ge=1024, le=1048576)
-    max_context_chars: int = Field(default=16000, ge=1000, le=32000)
+    max_file_bytes: int = Field(default=1048576, ge=1024, le=1048576)
+    max_context_chars: int = Field(default=64000, ge=1000, le=128000)
     model_timeout: float = Field(default=20, ge=1, le=60)
     model: str = "anthropic:claude-sonnet-4-5"
+    artifact_model_timeout: float = Field(default=180, ge=1, le=300)
     artifact_concurrency: int = Field(default=3, ge=1, le=8)
     artifact_max_requests: int = Field(default=60, ge=1, le=300)
     artifact_max_tokens: int = Field(default=150000, ge=1000, le=1000000)

@@ -1,0 +1,15 @@
+{
+  "repository": "jakedahn/nextjs-boilerplate",
+  "revision": "b032c55a473d328d0d5518c315fdc97b7b91ddf8",
+  "frameworks": [
+    "nextjs"
+  ],
+  "roles": [
+    "fullstack_web"
+  ],
+  "strategy": "native",
+  "source_bytes": 1086567,
+  "archive_bytes": 347335,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "passed"
+}

@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from voxops.artifacts.ci_actions import APPROVED_ACTIONS
 from voxops.artifacts.security import check_secret, redact, safe_read
 from voxops.core.errors import AppError
 from voxops.domain.artifact_models import ArtifactPlan, ArtifactTask, ValidationResult
@@ -233,14 +234,10 @@ def _workflow(
                 continue
             action = step.get("uses", "")
             if not isinstance(action, str) or (
-                action
-                and not re.fullmatch(
-                    r"actions/(?:checkout|setup-node|setup-python|cache|upload-artifact|download-artifact)@[0-9a-f]{40}",
-                    action,
-                )
+                action and action not in {f"{name}@{sha}" for name, sha in APPROVED_ACTIONS.items()}
             ):
                 errors.append(
-                    "Actions must use an approved official action pinned to a full commit SHA."
+                    "Actions must use an approved official action pinned to a verified commit SHA."
                 )
             run = step.get("run", "")
             if isinstance(action, str) and action.startswith("actions/checkout@"):
@@ -360,7 +357,7 @@ def validate_artifact(
         check_secret(task.target_path, content.encode("utf-8"))
     except AppError:
         errors.append("Artifact contains sensitive or binary material.")
-    if len(content.encode("utf-8")) > 131072:
+    if len(content.encode("utf-8")) > 1048576:
         errors.append("Artifact exceeds the size limit.")
     if task.artifact_type == "dockerfile":
         errors.extend(_docker(task, content, plan, root))
