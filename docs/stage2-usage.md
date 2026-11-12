@@ -98,9 +98,9 @@ Enable the MCP `get_me`, `search_repositories`, and `create_repository` tools wh
 | `VOXOPS_ARTIFACT_TASK_TOKENS` | 20,000 tokens per artifact across its attempts. |
 | `VOXOPS_ARTIFACT_STAGED_BYTES` | 8 MiB total private staged content. |
 | `VOXOPS_ARTIFACT_OPTIONAL_TOOLS` | False. Enables the installed actionlint parser only when true. |
-| `VOXOPS_MAX_FILE_BYTES` | 128 KiB per source file by default; generated text is capped at 128 KiB. |
-| `VOXOPS_MAX_CONTEXT_CHARS` | 16,000 characters per structured context packet. |
-| `VOXOPS_MODEL_TIMEOUT` | 20 seconds per content attempt. |
+| `VOXOPS_MAX_FILE_BYTES` | 1 MiB per source file by default; generated text is capped at 1 MiB. |
+| `VOXOPS_MAX_CONTEXT_CHARS` | 64,000 characters per structured context packet; configurable up to 128,000. |
+| `VOXOPS_ARTIFACT_MODEL_TIMEOUT` | 180 seconds per content attempt; configurable up to 300. |
 | `VOXOPS_GIT_TIMEOUT` | 30 seconds per Git command. |
 | `VOXOPS_GIT_AUTHOR_NAME`, `VOXOPS_GIT_AUTHOR_EMAIL` | VoxOps commit identity, configurable by the operator. |
 
@@ -109,3 +109,5 @@ Settings are read at startup. After configuring a model, restart with the same d
 Source patches are optional explicit plan inputs. Each `patches` item names `target_path`, `expected_hash`, `reason` and `correction`. Only existing supported source/config files are eligible. Lockfiles, env files, invented URLs and newly permissive CORS are blocked. The patch appears separately as `source_patch` in the final review.
 
 Inspect an owned worktree using `GET /api/v1/worktrees/WORKTREE_ID`. Cleanup uses `DELETE /api/v1/worktrees/WORKTREE_ID`. Dirty or committed worktrees require the explicit `?discard_changes=true` policy. Inspect them first. Stage 2 never automatically deletes reviewed or published worktrees. See [verification](stage2-verification.md) and [security](stage2-security.md).
+
+Each model request reserves at most one third of the per-file token allowance. Unknown usage still counts against that reservation. Generation and Stage 3 repairs share three total content attempts per file. CI receives the verified official action references in `src/voxops/artifacts/ci_actions.py`; other references are rejected without a network check.
