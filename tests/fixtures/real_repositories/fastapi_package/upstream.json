@@ -1,0 +1,15 @@
+{
+  "repository": "mgershenzon/fastapi-example",
+  "revision": "b9b7282c3a9566e2a0888e8a92ab19acf613dd65",
+  "frameworks": [
+    "fastapi"
+  ],
+  "roles": [
+    "http_service"
+  ],
+  "strategy": "container",
+  "source_bytes": 53188,
+  "archive_bytes": 27460,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "waiting_for_env"
+}

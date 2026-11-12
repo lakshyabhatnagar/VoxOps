@@ -1,0 +1,139 @@
+{
+  "plan": {
+    "schema_version": "1",
+    "plan_id": "d36895b01f8547b7b3092272ed45394c",
+    "revision": 1,
+    "scan_id": "294f26a10e964a7db880a3778cff587c",
+    "repo_fingerprint": "8c50aca54978b899190e3c97",
+    "source_input_fingerprint": "4fefe4cc32a4fbabeb878097b32deda0661622779f757f2ad29309c67783dc7d",
+    "strategy_by_unit": {
+      "1340fa1d12e310f3": "static"
+    },
+    "units": [
+      {
+        "id": "1340fa1d12e310f3",
+        "name": "next_static",
+        "root_path": ".",
+        "role": "static_frontend",
+        "framework": "nextjs",
+        "language": "javascript",
+        "runtime": {
+          "language": "javascript",
+          "version": null,
+          "package_manager": "npm",
+          "dependency_files": [
+            "package.json"
+          ],
+          "build_command": "npm run build",
+          "start_command": "npm run start",
+          "prerequisite_commands": [],
+          "command_source": "explicit",
+          "output_directory": "out",
+          "workspace_root": null,
+          "lockfile_path": "package-lock.json"
+        },
+        "config_requirements": [],
+        "dependency_candidates": [],
+        "shared_packages": [],
+        "detection": {
+          "framework": "nextjs",
+          "root_path": ".",
+          "role_candidate": "static_frontend",
+          "evidence": [
+            {
+              "path": "package.json",
+              "kind": "dependency",
+              "field": "next",
+              "confidence": 0.95,
+              "source": "deterministic"
+            },
+            {
+              "path": "next.config.js",
+              "kind": "next_static_export",
+              "field": "output: export",
+              "confidence": 0.95,
+              "source": "deterministic"
+            }
+          ],
+          "confidence": 0.95,
+          "unresolved_questions": []
+        }
+      }
+    ],
+    "tasks": {
+      "gitignore": {
+        "task_id": "gitignore",
+        "unit_id": null,
+        "artifact_type": "gitignore",
+        "target_path": ".gitignore",
+        "operation": "validate",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [
+          "next.config.js",
+          "package-lock.json",
+          "package.json",
+          "postcss.config.js",
+          "src/app/globals.css",
+          "src/app/layout.js",
+          "src/app/page.js",
+          "tailwind.config.js"
+        ],
+        "expected_commands": [],
+        "existing_hash": "15a2dd5cd553e5ac46afa49adfbbc452c39eb2c55fcb8d1c84e6e9a7d7b4a4eb",
+        "max_attempts": 3,
+        "reason": "Exclude local credentials and generated dependencies from publication.",
+        "evidence": [],
+        "approval_class": "artifact"
+      },
+      "ci": {
+        "task_id": "ci",
+        "unit_id": null,
+        "artifact_type": "ci",
+        "target_path": ".github/workflows/ci.yml",
+        "operation": "create",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [
+          "npm run build"
+        ],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "One build/test workflow covers the detected units without cloud deployment.",
+        "evidence": [
+          "package.json"
+        ],
+        "approval_class": "artifact"
+      },
+      "provider": {
+        "task_id": "provider",
+        "unit_id": null,
+        "artifact_type": "provider",
+        "target_path": "voxops-provider.json",
+        "operation": "skip",
+        "depends_on": [],
+        "strategy": null,
+        "build_context": ".",
+        "required_paths": [],
+        "expected_commands": [],
+        "existing_hash": null,
+        "max_attempts": 3,
+        "reason": "No provider target selected; no provider configuration needed.",
+        "evidence": [],
+        "approval_class": "artifact"
+      }
+    },
+    "warnings": [
+      "Static validation does not prove a build, running app, or GitHub CI success."
+    ],
+    "unresolved_questions": [],
+    "provider": null
+  },
+  "files": {
+    ".gitignore": "# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.\n\n# dependencies\n/node_modules\n/.pnp\n.pnp.js\n\n# testing\n/coverage\n\n# next.js\n/.next/\n/out/\n\n# production\n/build\n\n# misc\n.DS_Store\n*.pem\n\n# debug\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\n\n# local env files\n.env*.local\n\n# vercel\n.vercel\n\n# typescript\n*.tsbuildinfo\nnext-env.d.ts\n.env\n.env.*\n!.env.example\n.git/\n*.key\n",
+    ".github/workflows/ci.yml": "name: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main]\n\npermissions:\n  contents: read\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Checkout repository\n        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n        with:\n          persist-credentials: false\n\n      - name: Setup Node.js\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: 20\n          cache: npm\n\n      - name: Install dependencies\n        run: npm ci\n\n      - name: Build\n        run: npm run build\n"
+  }
+}

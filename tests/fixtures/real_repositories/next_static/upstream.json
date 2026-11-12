@@ -1,0 +1,15 @@
+{
+  "repository": "kinsta/hello-world-nextjs",
+  "revision": "77373b4634b5f71d9de564f2a3b1913789e79859",
+  "frameworks": [
+    "nextjs"
+  ],
+  "roles": [
+    "static_frontend"
+  ],
+  "strategy": "static",
+  "source_bytes": 119672,
+  "archive_bytes": 38224,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "passed"
+}

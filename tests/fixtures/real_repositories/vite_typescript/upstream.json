@@ -1,0 +1,15 @@
+{
+  "repository": "emisasal/vite-react-typescript",
+  "revision": "3bbadfe25845c29016eb704cf23563ffaed27104",
+  "frameworks": [
+    "react_vite"
+  ],
+  "roles": [
+    "static_frontend"
+  ],
+  "strategy": "static",
+  "source_bytes": 209045,
+  "archive_bytes": 54593,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "blocked_env_expression"
+}

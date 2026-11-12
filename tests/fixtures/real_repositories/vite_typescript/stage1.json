@@ -1,0 +1,358 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "6c753e0c8b0045c0b8a69e71b9c29ec9",
+    "scanned_at": "2026-11-12T14:29:43.573310Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "548f927bbae7cff2dff0ca36",
+    "display_name": "vite_typescript",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".env",
+      ".env.development",
+      ".env.production",
+      ".env.staging",
+      ".gitignore",
+      "README.md",
+      "eslint.config.js",
+      "package-lock.json",
+      "package.json",
+      "src/App.tsx",
+      "src/components/EnvVariables.tsx",
+      "src/main.tsx",
+      "src/pages/About.tsx",
+      "src/pages/Home.tsx",
+      "src/vite-env.d.ts",
+      "vite.config.ts"
+    ],
+    "shallow_tree": [
+      ".env",
+      ".env.development",
+      ".env.production",
+      ".env.staging",
+      ".gitignore",
+      ".prettierrc",
+      "LICENSE",
+      "README.md",
+      "eslint.config.js",
+      "index.html",
+      "package-lock.json",
+      "package.json",
+      "public/vite.svg",
+      "src/App.css",
+      "src/App.tsx",
+      "src/assets/react.svg",
+      "src/components/EnvVariables.tsx",
+      "src/index.css",
+      "src/main.scss",
+      "src/main.tsx",
+      "src/pages/About.tsx",
+      "src/pages/Home.tsx",
+      "src/pages/home.module.scss",
+      "src/vite-env.d.ts",
+      "tsconfig.app.json",
+      "tsconfig.app.tsbuildinfo",
+      "tsconfig.json",
+      "tsconfig.node.json",
+      "tsconfig.node.tsbuildinfo",
+      "vite.config.ts"
+    ],
+    "manifests": [
+      {
+        "path": "package.json",
+        "root_path": ".",
+        "kind": "node",
+        "dependencies": [
+          "@eslint/js",
+          "@types/react",
+          "@types/react-dom",
+          "@types/react-router",
+          "@vitejs/plugin-react",
+          "eslint",
+          "eslint-config-prettier",
+          "eslint-plugin-react",
+          "eslint-plugin-react-hooks",
+          "eslint-plugin-react-refresh",
+          "globals",
+          "prettier",
+          "react",
+          "react-dom",
+          "react-router",
+          "sass",
+          "typescript",
+          "typescript-eslint",
+          "vite"
+        ],
+        "scripts": {
+          "dev": "vite",
+          "build": "[redacted command]",
+          "preview": "vite preview"
+        },
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": "vite-react-testdrive",
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {
+      ".env": [
+        {
+          "name": "VITE_API_URL",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_APP_VERSION",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        }
+      ],
+      ".env.development": [
+        {
+          "name": "STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        }
+      ],
+      ".env.production": [
+        {
+          "name": "STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        }
+      ],
+      ".env.staging": [
+        {
+          "name": "STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        }
+      ],
+      "src/components/EnvVariables.tsx": [
+        {
+          "name": "DEV",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "MODE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "PROD",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "SSR",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "VITE_API_URL",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "referenced"
+        },
+        {
+          "name": "VITE_APP_VERSION",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "referenced"
+        },
+        {
+          "name": "VITE_STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "referenced"
+        }
+      ]
+    },
+    "evidence": [],
+    "warnings": [],
+    "input_fingerprint": "11e3323b3575cb48ea0915553b8a11f4f1929378b92e66641affb85e2a18af65",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "1340fa1d12e310f3",
+      "name": "vite_typescript",
+      "root_path": ".",
+      "role": "static_frontend",
+      "framework": "react_vite",
+      "language": "javascript",
+      "runtime": {
+        "language": "javascript",
+        "version": null,
+        "package_manager": "npm",
+        "dependency_files": [
+          "package.json"
+        ],
+        "build_command": "npm run build",
+        "start_command": null,
+        "prerequisite_commands": [],
+        "command_source": "explicit",
+        "output_directory": "dist",
+        "workspace_root": null,
+        "lockfile_path": "package-lock.json"
+      },
+      "config_requirements": [
+        {
+          "name": "DEV",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "MODE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "PROD",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "SSR",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "referenced"
+        },
+        {
+          "name": "STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "unknown",
+          "visibility": "unknown",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_API_URL",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_APP_VERSION",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        },
+        {
+          "name": "VITE_STRING_EXAMPLE",
+          "necessity": "unknown",
+          "stage": "build_time",
+          "visibility": "public",
+          "presence": "present"
+        }
+      ],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "react_vite",
+        "root_path": ".",
+        "role_candidate": "static_frontend",
+        "evidence": [
+          {
+            "path": "package.json",
+            "kind": "dependency",
+            "field": "react + vite",
+            "confidence": 0.95,
+            "source": "deterministic"
+          },
+          {
+            "path": "vite.config.ts",
+            "kind": "config",
+            "field": "Vite config",
+            "confidence": 0.9,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": []
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [],
+  "unresolved_ambiguities": [],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}

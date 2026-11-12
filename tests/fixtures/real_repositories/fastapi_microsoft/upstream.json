@@ -1,0 +1,15 @@
+{
+  "repository": "microsoft/python-sample-vscode-fastapi-tutorial",
+  "revision": "e84de17b833ae85f48e00e83f612066e1ec26cde",
+  "frameworks": [
+    "fastapi"
+  ],
+  "roles": [
+    "http_service"
+  ],
+  "strategy": "container",
+  "source_bytes": 18833,
+  "archive_bytes": 9751,
+  "candidate_origin": "Replayed live CI for the five retested cases; other candidates are explicit offline test responses. Microsoft Dockerfile was previously built with real Docker.",
+  "expected_stage3": "passed"
+}

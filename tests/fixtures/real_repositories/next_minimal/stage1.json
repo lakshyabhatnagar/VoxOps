@@ -1,0 +1,176 @@
+{
+  "schema_version": "1",
+  "scan": {
+    "id": "23c3244fb5ed4f29a961cf024ef42ea8",
+    "scanned_at": "2026-11-12T14:29:46.682301Z",
+    "scanner_version": "0.1.0",
+    "repo_fingerprint": "be0380a3a0db5f23627dba8b",
+    "display_name": "next_minimal",
+    "git": {
+      "status": "uninitialized",
+      "branch": null,
+      "head": null,
+      "dirty": false,
+      "has_remotes": false,
+      "detached": false,
+      "nested_path": false
+    },
+    "relevant_files": [
+      ".gitignore",
+      "README.md",
+      "components/Layout.tsx",
+      "components/Loading.tsx",
+      "lib/api.ts",
+      "lib/fetcher.ts",
+      "next-env.d.ts",
+      "package-lock.json",
+      "package.json",
+      "pages/_app.tsx",
+      "pages/_document.tsx",
+      "pages/index.tsx",
+      "postcss.config.js",
+      "tailwind.config.js"
+    ],
+    "shallow_tree": [
+      ".gitignore",
+      "README.md",
+      "components/Layout.tsx",
+      "components/Loading.tsx",
+      "lib/api.ts",
+      "lib/fetcher.ts",
+      "next-env.d.ts",
+      "package-lock.json",
+      "package.json",
+      "pages/_app.tsx",
+      "pages/_document.tsx",
+      "pages/index.tsx",
+      "postcss.config.js",
+      "public/favicon/android-chrome-192x192.png",
+      "public/favicon/android-chrome-512x512.png",
+      "public/favicon/apple-touch-icon.png",
+      "public/favicon/browserconfig.xml",
+      "public/favicon/favicon-16x16.png",
+      "public/favicon/favicon-32x32.png",
+      "public/favicon/favicon.ico",
+      "public/favicon/mstile-150x150.png",
+      "public/favicon/safari-pinned-tab.svg",
+      "public/favicon/site.webmanifest",
+      "styles/index.css",
+      "tailwind.config.js",
+      "tsconfig.json"
+    ],
+    "manifests": [
+      {
+        "path": "package.json",
+        "root_path": ".",
+        "kind": "node",
+        "dependencies": [
+          "@tailwindcss/forms",
+          "@types/jest",
+          "@types/node",
+          "@types/react",
+          "@types/react-dom",
+          "autoprefixer",
+          "axios",
+          "bootstrap-icons",
+          "classnames",
+          "date-fns",
+          "formik",
+          "gray-matter",
+          "next",
+          "postcss",
+          "react",
+          "react-dom",
+          "react-hot-toast",
+          "react-tooltip",
+          "remark",
+          "remark-html",
+          "swr",
+          "tailwindcss",
+          "typescript",
+          "yup"
+        ],
+        "scripts": {
+          "dev": "next",
+          "build": "next build",
+          "start": "next start"
+        },
+        "package_manager": null,
+        "runtime_version": null,
+        "workspace": false,
+        "local_dependencies": [],
+        "package_name": null,
+        "build_output_directory": null,
+        "build_output_dynamic": false,
+        "server_build": false
+      }
+    ],
+    "config_keys": {},
+    "evidence": [],
+    "warnings": [],
+    "input_fingerprint": "7895a6c495c3e0a6d47bb3df608d05d9a698cccad9e33c9c24044a1ec7a98781",
+    "workspace_roots": [],
+    "startup_commands": []
+  },
+  "detected_units": [
+    {
+      "id": "a03bf122f20ea32a",
+      "name": "next_minimal",
+      "root_path": ".",
+      "role": "server_rendered_web",
+      "framework": "nextjs",
+      "language": "javascript",
+      "runtime": {
+        "language": "javascript",
+        "version": null,
+        "package_manager": "npm",
+        "dependency_files": [
+          "package.json"
+        ],
+        "build_command": "npm run build",
+        "start_command": "npm run start",
+        "prerequisite_commands": [],
+        "command_source": "explicit",
+        "output_directory": null,
+        "workspace_root": null,
+        "lockfile_path": "package-lock.json"
+      },
+      "config_requirements": [],
+      "dependency_candidates": [],
+      "shared_packages": [],
+      "detection": {
+        "framework": "nextjs",
+        "root_path": ".",
+        "role_candidate": "server_rendered_web",
+        "evidence": [
+          {
+            "path": "package.json",
+            "kind": "dependency",
+            "field": "next",
+            "confidence": 0.95,
+            "source": "deterministic"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved_questions": [
+          "No static export: confirm SSR/runtime requirements."
+        ]
+      }
+    }
+  ],
+  "dependencies": [],
+  "warnings": [
+    "No configured model credential; deterministic analysis used."
+  ],
+  "unresolved_ambiguities": [
+    ".: No static export: confirm SSR/runtime requirements."
+  ],
+  "ai_usage": {
+    "status": "unavailable",
+    "model": null,
+    "requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "deterministic_only": true
+}
