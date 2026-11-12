@@ -19,12 +19,19 @@ from voxops.domain.execution_models import (
 from voxops.execution.environment import SecretSession
 
 
+# Identify the existing Stage 2 file task allowed to repair a specific execution failure.
+# Carry the short feedback explaining what that file needs to correct.
+# This chooses an already-owned task rather than authorizing edits anywhere in the app.
 @dataclass(frozen=True)
 class RepairTarget:
     task_id: str
     feedback: str
 
 
+# Keep the revised app result, attempt record, and user's blocker declaration together.
+# These records describe the same unavailable external dependency.
+# Returning them together lets the caller save a consistent explanation for incomplete
+# verification.
 @dataclass(frozen=True)
 class OperatorBlockerResult:
     unit: UnitVerification
@@ -32,6 +39,9 @@ class OperatorBlockerResult:
     declaration: OperatorExternalBlocker
 
 
+# Find which known candidate paths are explicitly mentioned in diagnostic text.
+# Match complete paths rather than accepting arbitrary text that merely contains similar letters.
+# Return only those known paths to help select a narrowly scoped repair task.
 def mentioned_paths(evidence: list[str], paths: list[str]) -> list[str]:
     text = "\n".join(evidence)
     return [
@@ -39,6 +49,9 @@ def mentioned_paths(evidence: list[str], paths: list[str]) -> list[str]:
     ][:20]
 
 
+# Check whether a user's external-service explanation matches the blocked runtime checks.
+# Require a passed build and a configured dependency belonging to this app.
+# Create an external-dependency diagnostic only when the missing checks and declaration agree.
 def operator_external_blocker(
     declaration: OperatorExternalBlocker, unit: UnitVerification, schema: EnvFormSchema
 ) -> ExecutionDiagnostic | None:
@@ -74,6 +87,10 @@ def operator_external_blocker(
     )
 
 
+# Check an operator declaration against a specific completed failed attempt.
+# Hide configuration values from the explanation before creating revised records.
+# Mark verification incomplete only when the declared dependency accounts for exactly the missing
+# runtime checks.
 def normalize_operator_blocker(
     declaration: OperatorExternalBlocker,
     unit: UnitVerification,
@@ -133,6 +150,9 @@ def normalize_operator_blocker(
     )
 
 
+# Look for a runtime failure tied to a declared required service configuration name.
+# Recognize supported connection, DNS, and authentication signals in the same evidence line.
+# Return an external-service diagnostic only when the evidence supports that explanation.
 def external_blocker(
     diagnostic: ExecutionDiagnostic, schema: EnvFormSchema, evidence: list[str]
 ) -> ExecutionDiagnostic | None:
@@ -175,6 +195,10 @@ def external_blocker(
     return None
 
 
+# Choose a narrowly supported repair from the existing Stage 2 tasks.
+# Handle approved bind-address source fixes or container COPY/input failures with identifiable
+# ownership.
+# Return no target when the failure does not justify editing one of those planned files.
 def repair_target(
     diagnostic: ExecutionDiagnostic,
     plan: ExecutionPlan,

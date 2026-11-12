@@ -501,8 +501,10 @@ class GitPublisher:
                 check_secret(file.path, content, allow_binary=True)
             self.write_owned(destination, file.path, content, file.mode)
 
-    # Prepares the working copy for file generation.
-    # Requires approved source choices and applies the selected changes.
+    # Prepare the approved source baseline and separate working copy used by generation.
+    # Reuse existing progress when resuming rather than replacing the user's original checkout.
+    # Stop for source approval when needed, then mark the run ready to generate files in its
+    # worktree.
     async def prepare(self, run: ArtifactRun) -> ArtifactRun:
         if run.status in {"rejected", "cancelled"}:
             raise AppError("approval_rejected", "Run was rejected or cancelled.", 409)
@@ -545,8 +547,11 @@ class GitPublisher:
         self.store.save_run(run)
         return run
 
-    # Builds a review of generated files and source changes.
-    # Compares the working copy with its approved parent and includes validation results.
+    # Compare the generated candidate with its approved baseline and build the final file review.
+    # Check that the candidate worktree and accepted proposals still match expected ownership and
+    # contents.
+    # Attach the current execution evidence so approval covers both the diff and the verification
+    # result.
     def artifact_review(self, run: ArtifactRun) -> ChangeReview:
         source = self.source(run)
         if not run.worktree_id:
@@ -653,8 +658,9 @@ class GitPublisher:
         self.store.save_run(run)
         return review
 
-    # Checks that a working copy still matches its approved review.
-    # Compares file contents, permissions and Git index before committing.
+    # Compare the worktree's HEAD and index with the reviewed parent and proposed tree.
+    # Permit only the expected baseline or already recorded publication state.
+    # Reject unrelated staged or committed changes before a reviewed commit is created or pushed.
     def verify_worktree(
         self, run: ArtifactRun, destination: Path, review: ChangeReview, tree: str
     ) -> None:
@@ -683,8 +689,11 @@ class GitPublisher:
             )
         self.executor.tree(destination, index_tree)
 
-    # Publishes the reviewed changes to the approved branch.
-    # Creates the commit, checks its history and verifies the remote after pushing.
+    # Require final approval, complete checked files, and the same verified GitHub destination.
+    # Check candidate verification and live configuration before creating the reviewed commit and
+    # before pushing.
+    # Verify the remote branch SHA afterward and return that exact branch and commit as the
+    # result.
     async def publish(self, run: ArtifactRun, *, authority=None) -> GitPublishResult:
         source = self.source(run)
         review = require_approval(run, "artifact_publication")

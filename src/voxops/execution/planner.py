@@ -25,6 +25,9 @@ from voxops.storage.artifact_store import digest
 _LOCKS = {"npm": "package-lock.json", "pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock"}
 
 
+# Check that a planned path stays inside the repository.
+# Reject absolute paths, parent-directory escapes, and unsupported characters.
+# Return the checked path for later file selection and Docker commands.
 def _path(value: str, *, allow_root: bool = True) -> str:
     path = PurePosixPath(value)
     if (
@@ -40,6 +43,9 @@ def _path(value: str, *, allow_root: bool = True) -> str:
     return value
 
 
+# Read a package manifest as a JSON object from the candidate files.
+# Use the existing safe file reader and reject missing or invalid JSON.
+# The planner needs actual package scripts and settings before choosing execution commands.
 def _manifest(source: Path, path: str) -> dict:
     try:
         data = safe_read(source, path)
@@ -53,6 +59,9 @@ def _manifest(source: Path, path: str) -> dict:
         ) from None
 
 
+# Turn a supported project script into the command arguments that Docker will execute.
+# Use the package-manager command when it matches the named script.
+# Explicit custom commands are kept for execution inside the container, with basic input limits.
 def _script(command: str | None, manager: str, scripts: dict, name: str) -> list[str]:
     if not command or not isinstance(scripts.get(name), str) or not scripts[name].strip():
         raise AppError("INVALID_ARTIFACT", f"A known {name} script is required.", 409)
@@ -68,6 +77,9 @@ def _script(command: str | None, manager: str, scripts: dict, name: str) -> list
     return [manager, "run", name]
 
 
+# Work out how a Vite or Next.js app installs, builds, and starts.
+# Read its real package manager, lockfile, scripts, workspace, and output settings.
+# Return the commands and required paths used to verify that app's chosen strategy.
 def _node_spec(source: Path, unit, strategy: str, settings: Settings, inventory) -> dict:
     root = _path(unit.root_path)
     workspace = _path(unit.runtime.workspace_root or root)
@@ -253,6 +265,9 @@ def _node_spec(source: Path, unit, strategy: str, settings: Settings, inventory)
     )
 
 
+# Read the planned Dockerfile and determine how its server can be checked.
+# Validate the supported startup command, port, and required input paths.
+# Reject unclear cases instead of inventing a runtime command that the image may not support.
 def _container_spec(
     source: Path, artifact_plan: ArtifactPlan, unit, probe: ProbeSpec | None
 ) -> dict:
@@ -336,6 +351,10 @@ def _container_spec(
     )
 
 
+# Turn the existing Stage 2 file plan into concrete verification jobs.
+# Choose the supported container, native-server, or static-build path for each app.
+# Record job dependencies and input comparison codes so later results belong to these exact
+# inputs.
 def build_execution_plan(
     source: Path,
     artifact_plan: ArtifactPlan,
@@ -423,6 +442,9 @@ def build_execution_plan(
     )
 
 
+# Create a private build copy for every app in the execution plan.
+# Check that the candidate still matches the source inventory used when planning.
+# If any copy fails, remove the copies already created before returning the error.
 def freeze_plan_contexts(
     source: Path, plan: ExecutionPlan, settings: Settings
 ) -> dict[str, FrozenContext]:

@@ -24,6 +24,9 @@ from voxops.execution.contexts import FrozenContext, verify_context
 from voxops.execution.environment import SecretSession
 
 
+# Describe how much CPU and memory one build or runtime wants.
+# Keep the operation phase beside those numbers.
+# The shared budget uses this request before allowing another container to start.
 @dataclass(frozen=True)
 class ResourceDemand:
     phase: str
@@ -31,6 +34,9 @@ class ResourceDemand:
     memory_bytes: int
 
 
+# Remember one active reservation of Docker host capacity.
+# Keep the requested resources, observed host capacity, and concurrency limit together.
+# Other reservations must fit alongside it rather than checking each run in isolation.
 @dataclass(frozen=True)
 class _Lease:
     demand: ResourceDemand
@@ -38,13 +44,22 @@ class _Lease:
     concurrency: int
 
 
+# Track Docker resource reservations shared by runs in this Python process.
+# Count pending creates too, since they will soon consume CPU and memory.
+# Use a thread lock because callers can come from different event loops.
 class _ExecutionBudget:
     """Reservations include pending creates, across policies and event loops."""
 
+    # Create the lock and an empty dictionary of resource reservations.
+    # The dictionary is keyed by a random reservation token.
+    # A driver later uses its token to release exactly its own reservation.
     def __init__(self):
         self.lock = threading.Lock()
         self.leases: dict[str, _Lease] = {}
 
+    # Check whether this operation fits alongside all current reservations.
+    # Respect the strictest active limits and leave CPU and memory reserved for the host.
+    # Return a reservation token if it fits, or no token so the caller can wait.
     def acquire(self, capacity: "Capacity", settings: Settings, phase: str) -> str | None:
         demand = ResourceDemand(
             phase,
@@ -67,6 +82,9 @@ class _ExecutionBudget:
             self.leases[token] = candidate
             return token
 
+    # Remove one capacity reservation by its token.
+    # Ignore an already released token rather than failing during cleanup.
+    # This makes that reservation's CPU, memory, and concurrency allowance available again.
     def release(self, token: str) -> None:
         with self.lock:
             self.leases.pop(token, None)
@@ -75,6 +93,9 @@ class _ExecutionBudget:
 _execution_budget = _ExecutionBudget()
 
 
+# Describe what happened when a Docker command finished.
+# Keep its exit code, bounded display output, duration, and timeout or cancellation flags.
+# Store raw stdout separately when internal code needs to parse Docker's structured response.
 @dataclass(frozen=True)
 class CommandOutcome:
     exit_code: int | None
@@ -85,6 +106,10 @@ class CommandOutcome:
     _stdout: str = field(default="", repr=False)
 
 
+# Describe the Docker host's observed CPU, memory, and server details.
+# Include the calculated number of build slots under the configured limits.
+# The driver uses these facts when deciding whether work can start and when checking cached
+# results.
 @dataclass(frozen=True)
 class Capacity:
     cpus: int
@@ -94,6 +119,9 @@ class Capacity:
     docker_version: str
 
 
+# Remember a built image's ID, generated tag, and owning task.
+# The ID names the actual image rather than a tag that could later move.
+# The runner passes this record to the runtime step after a successful build.
 @dataclass(frozen=True)
 class ImageHandle:
     id: str
@@ -101,6 +129,9 @@ class ImageHandle:
     task_id: str
 
 
+# Remember a Docker container created for one verification task.
+# Keep ownership, image, timing, and optional local-port information with its ID.
+# Later exec, inspection, and cleanup operations check this record before using the container.
 @dataclass(frozen=True)
 class RuntimeHandle:
     id: str
@@ -112,13 +143,24 @@ class RuntimeHandle:
     tool_version: str | None = None
 
 
+# Describe a builder that also owns a writable project-copy volume.
+# Add that volume name to the ordinary container information.
+# A native server can reuse the built workspace after its builder container has stopped.
 @dataclass(frozen=True, kw_only=True)
 class WorkspaceHandle(RuntimeHandle):
     workspace_volume: str
     unit_id: str
 
 
+# Perform the concrete Docker operations used by Stage 3.
+# Create labeled resources, apply limits, capture bounded output, and remove owned resources
+# afterward.
+# Keep application commands inside containers; the host command runner accepts Docker commands
+# only.
 class DockerDriver:
+    # Remember this run's settings, cancellation signal, and secret-redaction function.
+    # Create a unique ownership label and start with no reserved slot or owned resources.
+    # The journal callback will save resource changes so interrupted work can later be cleaned up.
     def __init__(
         self,
         settings: Settings,
@@ -144,9 +186,15 @@ class DockerDriver:
         self.capacity: Capacity | None = None
         self._phase_deadline: float | None = None
 
+    # Build the identifying labels for this run, owner, and task.
+    # Attach the same values whenever this driver creates or checks a resource.
+    # Cleanup uses them to distinguish this run's resources from unrelated Docker objects.
     def _labels(self, task: str) -> dict[str, str]:
         return {"app": "voxops-stage3", "owner": self.owner, "run": self.run_id, "task": task}
 
+    # Turn the ownership label dictionary into Docker command arguments.
+    # Keep label construction in one place so different creation paths use the same format.
+    # These arguments let later inspections prove which task created the resource.
     def _label_args(self, task: str) -> list[str]:
         return [
             part
@@ -154,11 +202,19 @@ class DockerDriver:
             for part in ("--label", f"{key}={value}")
         ]
 
+    # Pass a resource update to the caller's journal function.
+    # Support either a normal callback or one that must be awaited.
+    # The caller persists it alongside the execution run rather than this driver owning
+    # application storage.
     async def _record(self, item: OwnedResourceIntent) -> None:
         result = self.journal(item)
         if inspect.isawaitable(result):
             await result
 
+    # Record that a named container, image, or volume is about to be created.
+    # Save the record before issuing the Docker create or load operation.
+    # An interrupted run can then look for a resource even if creation finished before its ID was
+    # saved.
     async def _intent(self, kind: str, task: str, name: str) -> OwnedResourceIntent:
         if self.cancel.is_set():
             raise AppError("CANCELLED", "Execution was cancelled.", 409)
@@ -167,10 +223,16 @@ class DockerDriver:
         self.resources.append(item)
         return item
 
+    # Update a resource record after Docker returns its real ID.
+    # Mark it active and send the updated copy to the journal.
+    # Cleanup can now check both the resource name and the ID instead of trusting a name alone.
     async def _active(self, item: OwnedResourceIntent, resource_id: str) -> None:
         item.resource_id, item.state = resource_id, "active"
         await self._record(item)
 
+    # Run a Docker CLI process and read stdout and stderr concurrently.
+    # Bound retained output, hide known secrets, and watch the timeout and cancellation signal.
+    # Kill the command's process group when interrupted so subprocesses are not left running.
     async def command(
         self,
         args: list[str],
@@ -196,6 +258,9 @@ class DockerDriver:
         except FileNotFoundError:
             raise AppError("DOCKER_UNAVAILABLE", "Docker CLI is not installed.", 409) from None
 
+        # Keep consuming one output stream so the Docker process cannot block on a full pipe.
+        # Retain only bounded, redacted complete lines and discard oversized lines.
+        # When requested, also keep a bounded raw copy of stdout for internal metadata parsing.
         async def drain(stream, machine=False) -> tuple[str, str]:
             retained: deque[str] = deque()
             used = 0
@@ -203,6 +268,9 @@ class DockerDriver:
             discard = False
             machine_bytes = bytearray()
 
+            # Add one already-redacted line to the retained output buffer.
+            # Count its bytes as well as the number of saved lines.
+            # Drop the oldest lines until both output limits are satisfied.
             def retain(line):
                 nonlocal used
                 encoded = len(line.encode())
@@ -300,6 +368,9 @@ class DockerDriver:
             machine if machine_output else stdout,
         )
 
+    # Add the Docker executable to a command's arguments and enforce any shared deadline.
+    # Turn nonzero exits, timeouts, and cancellation into the project's structured errors.
+    # Return stdout on success so callers can parse IDs or metadata.
     async def _run(
         self,
         args: list[str],
@@ -328,6 +399,9 @@ class DockerDriver:
             )
         return result._stdout.strip()
 
+    # Ask Docker for host capacity and confirm the daemon is accessible.
+    # Check that the requested phase fits while leaving the host's CPU and memory reserve.
+    # Return capacity and server-version details used by reservations and verification records.
     async def preflight(self, phase: str = "build", *, deadline: float | None = None) -> Capacity:
         if phase not in {"build", "runtime"}:
             raise ValueError("Unknown execution phase")
@@ -389,6 +463,9 @@ class DockerDriver:
         )
         return self.capacity
 
+    # Look up the exact image behind a requested name.
+    # If Docker reports that the image is missing, pull it and inspect it again.
+    # Return image metadata so later operations use a concrete image ID.
     async def resolve_image(self, image: str, *, deadline: float | None = None) -> dict:
         try:
             return await self._inspect("image", image, deadline=deadline)
@@ -400,6 +477,9 @@ class DockerDriver:
         )
         return await self._inspect("image", image, deadline=deadline)
 
+    # Request Docker metadata for a container, image, or volume.
+    # Parse only the supported response shape and reject malformed or oversized output.
+    # The rest of the driver uses these checked facts for ownership and runtime decisions.
     async def _inspect(
         self,
         kind: str,
@@ -460,6 +540,9 @@ class DockerDriver:
                 data["State"]["Error"] = self.redact(data["State"]["Error"])[:1000]
         return data
 
+    # Compare a created container's actual Docker limits with the requested limits.
+    # Check CPU, memory, PID, and other enforced settings through inspected metadata.
+    # Fail rather than claiming bounded execution when Docker did not apply the expected settings.
     async def _verify_limits(
         self, name: str, memory: int, cpus: float, pids: int, deadline: float | None = None
     ) -> dict:
@@ -476,6 +559,9 @@ class DockerDriver:
             )
         return data
 
+    # Wait for a shared CPU, memory, and concurrency reservation before creating a container.
+    # Check cancellation and the phase deadline while capacity is unavailable.
+    # Remember the reservation so cleanup can release it after the owned container is gone.
     async def _acquire_slot(self, phase: str = "build", *, deadline: float | None = None) -> None:
         if self._slot or self._acquiring:
             raise AppError(
@@ -510,6 +596,10 @@ class DockerDriver:
         finally:
             self._acquiring = False
 
+    # Reserve host capacity and create the container used for an image build.
+    # Remember which container is holding the reservation.
+    # If setup fails, clean up before returning the error so failed setup does not consume a slot
+    # forever.
     async def builder(self, task: str) -> RuntimeHandle:
         await self._acquire_slot()
         try:
@@ -520,6 +610,9 @@ class DockerDriver:
             await self.cleanup()
             raise
 
+    # Read the last output line as Docker's newly created container ID.
+    # Require the expected full hexadecimal format.
+    # Reject unexpected output instead of passing an arbitrary string to later Docker commands.
     @staticmethod
     def _created_id(output: str) -> str:
         candidate = output.splitlines()[-1] if output else ""
@@ -529,6 +622,9 @@ class DockerDriver:
             )
         return candidate
 
+    # Create the labeled, limited BuildKit container used to build an application image.
+    # Prepare its storage and verify that the required build tool and isolation are available.
+    # Return the actual builder ID and tool details for the runner's saved evidence.
     async def _create_builder(self, task: str) -> RuntimeHandle:
         deadline = self._build_deadline
         suffix = uuid4().hex
@@ -614,6 +710,9 @@ class DockerDriver:
             409,
         )
 
+    # Build an application image using the supplied owned builder and frozen inputs.
+    # Delegate the build details to the checked internal implementation.
+    # If any part fails, clean up the driver's resources before propagating the error.
     async def build(
         self,
         builder: RuntimeHandle,
@@ -628,6 +727,11 @@ class DockerDriver:
             await self.cleanup()
             raise
 
+    # Check the Dockerfile, builder ownership, input copy, and build deadline.
+    # Pass public build arguments normally, but require supported secret mounts for private build
+    # values.
+    # Build an archive, load the resulting image, verify its ownership labels, and return its
+    # concrete ID.
     async def _build(self, builder, context, dockerfile, session, unit) -> ImageHandle:
         path = PurePosixPath(dockerfile)
         if (
@@ -745,6 +849,9 @@ class DockerDriver:
         await self._active(item, image["Id"])
         return ImageHandle(image["Id"], tag, task)
 
+    # Start a runtime for a built image under the configured limits.
+    # Delegate container creation to the internal runtime method.
+    # If startup setup fails, clean up owned resources before returning the error.
     async def runtime(
         self,
         image: str,
@@ -764,6 +871,11 @@ class DockerDriver:
             await self.cleanup()
             raise
 
+    # Create a labeled runtime container from an exact image ID.
+    # Inject its environment, apply resource limits, and bind its service port to an allocated
+    # loopback port.
+    # Verify the resulting container settings before returning the handle used for readiness
+    # checks.
     async def _runtime(
         self,
         image,
@@ -881,6 +993,9 @@ class DockerDriver:
             resource_id, item.name, task, host_port, deadline if _build else None, image_info["Id"]
         )
 
+    # Create a builder container and writable project volume for native or static builds.
+    # Copy the checked inputs into that workspace and pass the app's build configuration.
+    # Return both the container and volume information so later commands use this owned workspace.
     async def workspace_builder(
         self, image: str, task: str, session: SecretSession, unit: str, workspace: FrozenContext
     ) -> WorkspaceHandle:
@@ -916,6 +1031,9 @@ class DockerDriver:
             await self.cleanup()
             raise
 
+    # Hand a completed native build's workspace over to a server container.
+    # Validate the builder and its volume, then stop the builder while keeping the volume.
+    # Start the server using that same built workspace and prevent the handoff from being reused.
     async def native_runtime(
         self,
         builder: WorkspaceHandle,
@@ -1001,6 +1119,9 @@ class DockerDriver:
             await self.cleanup()
             raise
 
+    # Check that a container handle belongs to this driver's active resource records.
+    # Match its ID and ownership instead of accepting an arbitrary Docker container ID.
+    # All command paths using an existing container call this before touching it.
     def _require_owned(self, runtime: RuntimeHandle) -> None:
         if not any(
             item.kind == "container"
@@ -1015,6 +1136,9 @@ class DockerDriver:
                 "ownership_mismatch", "Container is not active in this driver's journal.", 409
             )
 
+    # Run a command inside a container that this driver owns.
+    # Use the requested working directory and cap execution by the relevant remaining deadline.
+    # Return the bounded command result for build or static-output checks.
     async def exec(
         self,
         runtime: RuntimeHandle,
@@ -1041,6 +1165,9 @@ class DockerDriver:
             await self.cleanup(owned)
         return outcome
 
+    # Read a bounded tail of an owned container's logs.
+    # Apply the configured line and byte limits through the command reader.
+    # The runner uses the redacted output to explain a failed startup or build.
     async def logs(self, runtime: RuntimeHandle) -> CommandOutcome:
         self._require_owned(runtime)
         owned = [item for item in self.resources if item.resource_id == runtime.id]
@@ -1053,10 +1180,16 @@ class DockerDriver:
             await self.cleanup(owned)
         return outcome
 
+    # Check ownership before inspecting a running container.
+    # Return the container's state information from Docker metadata.
+    # Readiness checks use it to notice exits and out-of-memory termination.
     async def inspect_runtime(self, runtime: RuntimeHandle) -> dict:
         self._require_owned(runtime)
         return (await self._inspect("container", runtime.id))["State"]
 
+    # Copy a requested output path from an owned container to a local destination.
+    # Use Docker's copy operation rather than executing application code on the host.
+    # Apply the build deadline so copying cannot outlive the allowed operation.
     async def copy_output(self, runtime: RuntimeHandle, source: str, destination: Path) -> None:
         self._require_owned(runtime)
         path = PurePosixPath(source)
@@ -1066,6 +1199,10 @@ class DockerDriver:
             ["cp", f"{runtime.id}:{source}", str(destination)], deadline=runtime.build_deadline
         )
 
+    # Remove only recorded resources whose inspected ownership still matches this driver.
+    # Remove containers before their dependent volumes and verify successful removal.
+    # Update the journal and release capacity when appropriate; report resources that could not be
+    # safely removed.
     async def cleanup(
         self,
         resources: list[OwnedResourceIntent] | None = None,

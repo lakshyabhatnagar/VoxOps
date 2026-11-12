@@ -27,7 +27,15 @@ from voxops.repository.snapshot import capture_source
 from voxops.storage.artifact_store import ArtifactStore
 
 
+# Create the demo's local simulated model rather than calling a paid model service.
+# Generate a deliberately broken first Dockerfile and a corrected version after execution
+# feedback.
+# Record calls so the demo can show that an actual repair request occurred.
 def fixture_agent(calls):
+    # Read the generator's request and return the supported file content for that job.
+    # Use the missing application path before execution feedback and the real path afterward.
+    # This controls the model response while the demo still exercises the real HTTP, Docker,
+    # repair, and Git flow.
     async def respond(messages, info):
         packet = json.loads(messages[-1].parts[0].content)
         task = packet["task"]
@@ -73,6 +81,11 @@ def fixture_agent(calls):
     )
 
 
+# Run the disposable Stage 3 demonstration through a local HTTP server and real Docker.
+# Use a local bare Git remote and simulated model and GitHub metadata rather than publishing a
+# real project.
+# Approve the final review, verify the resulting branch SHA, and check the original source and
+# cleanup results.
 def main():
     for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "NVIDIA_API_KEY"):
         os.environ.pop(name, None)
@@ -128,6 +141,9 @@ def main():
                 base_url=f"http://127.0.0.1:{listener.getsockname()[1]}", timeout=1800
             ) as client:
 
+                # Send one HTTP request to the demo's local VoxOps server.
+                # Reject error responses and decode successful JSON responses.
+                # Keep the demo steps readable while still exercising the actual API routes.
                 def request(method, path, body=None, expected=200):
                     response = client.request(method, path, json=body)
                     assert response.status_code == expected, (response.status_code, response.text)

@@ -49,6 +49,9 @@ LEVEL_CHECKS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Remember where a configuration name was discovered.
+# Store the source path, optional line number, and a short explanation.
+# This lets the form explain why it asks for a value without storing the value itself.
 class EnvEvidence(Model):
     path: str
     line: int | None = Field(default=None, ge=1)
@@ -56,11 +59,18 @@ class EnvEvidence(Model):
     detail: str = Field(default="", max_length=500)
 
 
+# Name an app that uses an environment variable.
+# Record whether that app needs it during the build or while running.
+# The session uses this pair to send values only to the operations that need them.
 class EnvConsumer(Model):
     unit_id: str
     phase: Literal["build", "runtime"]
 
 
+# Describe one configuration field in the environment form.
+# Keep its name, consumers, expected type, requiredness, and how it is currently resolved.
+# Actual values live separately in memory, so this record can be saved without including
+# passwords.
 class EnvRequirement(Model):
     field_id: str = Field(min_length=1)
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -75,6 +85,9 @@ class EnvRequirement(Model):
     max_length: int = Field(default=8192, ge=1, le=65536)
     evidence: list[EnvEvidence] = Field(default_factory=list, max_length=30)
 
+    # Reject repeated consumers for the same field.
+    # Also reject a field marked defaulted when no supported default was discovered.
+    # This keeps the saved form's status consistent with the evidence used to build it.
     @model_validator(mode="after")
     def valid_resolution(self) -> "EnvRequirement":
         keys = {(item.unit_id, item.phase) for item in self.consumers}
@@ -85,6 +98,9 @@ class EnvRequirement(Model):
         return self
 
 
+# Describe the complete environment form for this source version.
+# Include discovered fields, selected .env file names, and unresolved scanning questions.
+# Save this structure independently from the private values used to fill it.
 class EnvFormSchema(Model):
     schema_version: Literal["1"] = "1"
     source_digest: Digest
@@ -94,6 +110,9 @@ class EnvFormSchema(Model):
     env_files: dict[str, list[str]] = Field(default_factory=dict)
     requirements: list[EnvRequirement] = Field(default_factory=list)
 
+    # Check that every form field has a different field ID.
+    # Repeated names can legitimately exist in different scopes, but their IDs must still differ.
+    # Reject duplicates so a submission cannot accidentally address two different fields at once.
     @model_validator(mode="after")
     def distinct_fields(self) -> "EnvFormSchema":
         if len({item.field_id for item in self.requirements}) != len(self.requirements):
@@ -101,12 +120,19 @@ class EnvFormSchema(Model):
         return self
 
 
+# Describe the local HTTP request used to check a server.
+# Keep its container port, path, and optional health-success statuses together.
+# The driver supplies the allocated host port when the readiness request actually runs.
 class ProbeSpec(Model):
     path: str = Field(default="/", pattern=r"^/[^\s]*$", max_length=512)
     port: int = Field(ge=1, le=65535)
     health_contract: bool = False
     success_statuses: list[int] = Field(default_factory=lambda: [200], min_length=1)
 
+    # Reject paths that could redirect the intended request to another address or add extra URL
+    # parts.
+    # Require explicit health-success statuses to be successful HTTP responses.
+    # This keeps the probe's saved contract consistent with the local check the runner performs.
     @model_validator(mode="after")
     def safe_probe(self) -> "ProbeSpec":
         if self.path.startswith("//") or any(char in self.path for char in "?#\\"):
@@ -116,6 +142,9 @@ class ProbeSpec(Model):
         return self
 
 
+# Describe how one app will be built and checked.
+# Store its selected files, commands, Docker strategy, tools, expected output, and HTTP details.
+# The planner fills this record and the runner uses it without guessing new commands mid-run.
 class UnitExecutionSpec(Model):
     unit_id: str
     strategy: Strategy
@@ -139,6 +168,10 @@ class UnitExecutionSpec(Model):
     probe: ProbeSpec | None = None
     required_level: VerificationLevel
 
+    # Reject a plan that stops at merely building or starting an app.
+    # Require static strategies to verify output and server strategies to have the required HTTP
+    # details.
+    # A saved plan must describe enough checking to support the final review.
     @model_validator(mode="after")
     def real_verification_target(self) -> "UnitExecutionSpec":
         if self.required_level in {"not_attempted", "build_passed", "process_started"}:
@@ -160,6 +193,10 @@ class UnitExecutionSpec(Model):
         return self
 
 
+# Describe one build, startup, HTTP-probe, or static-output job.
+# Name its app, the jobs it waits for, and its input comparison code.
+# Those dependencies keep readiness checks from running before their required build or startup
+# step.
 class ExecutionTask(Model):
     task_id: str
     unit_id: str
@@ -168,6 +205,10 @@ class ExecutionTask(Model):
     input_digest: Digest
 
 
+# Group all apps' execution settings and verification jobs under one plan ID.
+# Link that plan to the original Stage 2 file-generation plan.
+# The service saves it so attempts and results can be checked against the work that was actually
+# requested.
 class ExecutionPlan(Model):
     schema_version: Literal["1"] = "1"
     plan_id: str
@@ -176,6 +217,9 @@ class ExecutionPlan(Model):
     units: dict[str, UnitExecutionSpec] = Field(min_length=1)
     tasks: dict[str, ExecutionTask] = Field(min_length=1)
 
+    # Check that jobs refer to real apps and dependencies and do not form a dependency loop.
+    # Require each app's verification operations exactly once.
+    # Also ensure startup, output, and HTTP jobs wait for the earlier operations they need.
     @model_validator(mode="after")
     def valid_graph(self) -> "ExecutionPlan":
         if any(key != unit.unit_id for key, unit in self.units.items()):
@@ -223,6 +267,9 @@ class ExecutionPlan(Model):
         return self
 
 
+# Name the run, execution, and plans that one verification result belongs to.
+# Keep comparison codes instead of copies of all source files or secret values.
+# The publication checks compare this identity with the files and plans currently being approved.
 class CandidateIdentity(Model):
     artifact_run_id: str
     execution_id: str
@@ -235,6 +282,10 @@ class CandidateIdentity(Model):
     digest: Digest
 
 
+# Describe an observed execution problem in a bounded, structured record.
+# Keep its category, stage, app, evidence, and relevant known paths together.
+# Repair and review code can then distinguish a file defect from missing configuration or an
+# unavailable service.
 class ExecutionDiagnostic(Model):
     diagnostic_id: str
     unit_id: str | None = None
@@ -264,6 +315,9 @@ class ExecutionDiagnostic(Model):
     dependency_name: str | None = None
     external_signal: Literal["dns", "connection", "authentication", "operator"] | None = None
 
+    # Require an external-service failure to identify its dependency and supporting signal.
+    # Accept that classification only for startup or HTTP checking with recorded evidence.
+    # A build defect cannot become incomplete verification merely by being labeled external.
     @model_validator(mode="after")
     def grounded_external_blocker(self) -> "ExecutionDiagnostic":
         if self.category == "EXTERNAL_SERVICE_UNAVAILABLE" and (
@@ -276,6 +330,9 @@ class ExecutionDiagnostic(Model):
         return self
 
 
+# Describe a user's explanation that a configured external service is unavailable.
+# Name the affected app, dependency, and runtime checks that could not be completed.
+# This declaration is checked against actual attempt records before it changes a result.
 class OperatorExternalBlocker(Model):
     blocker_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     unit_id: str
@@ -283,6 +340,9 @@ class OperatorExternalBlocker(Model):
     explanation: str = Field(min_length=1, max_length=1000)
     checks: list[Literal["startup", "http", "health"]] = Field(min_length=1, max_length=3)
 
+    # Reject a declaration that lists the same missing check more than once.
+    # The list must identify distinct startup, HTTP, or health checks.
+    # This makes exact comparisons with the app's unverified checks meaningful.
     @model_validator(mode="after")
     def distinct_checks(self) -> "OperatorExternalBlocker":
         if len(set(self.checks)) != len(self.checks):
@@ -290,6 +350,9 @@ class OperatorExternalBlocker(Model):
         return self
 
 
+# Save the result of one specific verification check.
+# Link its status and evidence to the attempt that produced them.
+# For HTTP checks, keep the observed status code so success can be validated later.
 class CheckResult(Model):
     check_id: str
     kind: CheckKind
@@ -299,6 +362,10 @@ class CheckResult(Model):
     attempt_id: str | None = None
     http_status: int | None = Field(default=None, ge=100, le=599)
 
+    # Reject passed checks that lack evidence or a recorded attempt.
+    # Require an appropriate observed status for passed HTTP checks.
+    # Health and static HTTP checks need successful responses rather than merely reaching a
+    # server.
     @model_validator(mode="after")
     def truthful_check(self) -> "CheckResult":
         if self.status == "passed" and not self.evidence:
@@ -313,6 +380,10 @@ class CheckResult(Model):
         return self
 
 
+# Summarize the build and runtime or static-output checks for one app.
+# Keep its required level, achieved level, individual results, and diagnostics together.
+# The service uses this to decide whether the app passed, needs repair, or remains incompletely
+# verified.
 class UnitVerification(Model):
     unit_id: str
     input_digest: Digest
@@ -322,6 +393,9 @@ class UnitVerification(Model):
     checks: dict[CheckKind, CheckResult]
     diagnostics: list[ExecutionDiagnostic] = Field(default_factory=list)
 
+    # Check that each saved check belongs to this app and supports the claimed achieved level.
+    # Require every necessary check to pass before the app can be marked passed.
+    # Permit incomplete verification only under the supported external-blocker conditions.
     @model_validator(mode="after")
     def truthful_status(self) -> "UnitVerification":
         if any(
@@ -363,6 +437,9 @@ class UnitVerification(Model):
         return self
 
 
+# Record one actual try at a verification operation.
+# Keep its number, input comparison code, timing, result, and bounded evidence.
+# Retries append new attempts so the original failure and later correction remain visible.
 class ExecutionAttempt(Model):
     attempt_id: str
     task_id: str
@@ -379,6 +456,10 @@ class ExecutionAttempt(Model):
     evidence: list[str] = Field(default_factory=list, max_length=30)
 
 
+# Record a Docker container, image, or volume that this execution owns or intends to create.
+# Track its name, eventual ID, ownership token, and cleanup state.
+# Recovery can inspect these records after interruption without deleting unrelated Docker
+# resources.
 class OwnedResourceIntent(Model):
     resource_id: str | None = None
     name: str
@@ -388,6 +469,10 @@ class OwnedResourceIntent(Model):
     state: Literal["creating", "active", "removing", "removed"] = "creating"
 
 
+# Collect the per-app verification results for one exact candidate.
+# Keep the overall status, creation time, and report comparison code beside the candidate
+# identity.
+# This is the saved report attached to the final review; it does not represent a cloud deployment.
 class ExecutionAttestation(Model):
     schema_version: Literal["1"] = "1"
     identity: CandidateIdentity
@@ -397,6 +482,10 @@ class ExecutionAttestation(Model):
     deployment_executed: Literal[False] = False
     digest: str = ""
 
+    # Check that the report's app keys match their contained app IDs.
+    # An overall pass requires every app to pass.
+    # An incomplete report may contain passed and incompletely verified apps, but not unrelated
+    # failures.
     @model_validator(mode="after")
     def truthful_aggregate(self) -> "ExecutionAttestation":
         if any(key != item.unit_id for key, item in self.units.items()):
@@ -414,6 +503,9 @@ class ExecutionAttestation(Model):
         return self
 
 
+# Record that the user accepts the exact checks left unverified in a specific review.
+# Name both the review and verification report by their comparison codes.
+# Changing the review or the missing-check list means this acknowledgement no longer applies.
 class IncompleteAcknowledgement(Model):
     review_id: str
     review_digest: Digest
@@ -422,6 +514,10 @@ class IncompleteAcknowledgement(Model):
     acknowledged: Literal[True]
 
 
+# Hold the saved progress for one execution of a Stage 2 candidate.
+# Keep the plan, value-free environment form, attempts, results, resource records, and final
+# report.
+# Actual secret values remain in the separate in-memory session rather than in this saved object.
 class ExecutionRun(Model):
     schema_version: Literal["1"] = "1"
     execution_id: str
@@ -440,6 +536,10 @@ class ExecutionRun(Model):
     resources: list[OwnedResourceIntent] = Field(default_factory=list)
     attestation: ExecutionAttestation | None = None
 
+    # Check that the saved run, candidate identity, report, jobs, and attempts refer to each other
+    # correctly.
+    # Require operator blockers to identify planned checks and configured dependencies.
+    # Reject mismatched or duplicated records instead of letting them support publication.
     @model_validator(mode="after")
     def linked_identity(self) -> "ExecutionRun":
         if self.identity.execution_id != self.execution_id or (

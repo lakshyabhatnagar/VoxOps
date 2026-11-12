@@ -11,6 +11,9 @@ from voxops.domain.execution_models import ProbeSpec
 from voxops.execution.docker_driver import DockerDriver, RuntimeHandle
 
 
+# Hold the result of checking an app's local HTTP endpoint.
+# Record the response status, elapsed time, and short descriptions of what was observed.
+# The runner turns this into saved check evidence rather than saving a response body.
 @dataclass(frozen=True)
 class HTTPObservation:
     status: int
@@ -18,6 +21,9 @@ class HTTPObservation:
     evidence: tuple[str, ...]
 
 
+# Wait briefly between checks while still responding to cancellation.
+# Return normally when the delay expires.
+# Raise cancellation immediately if the user stops the run before the delay finishes.
 async def _pause(cancel: asyncio.Event, duration: float) -> None:
     if cancel.is_set():
         raise AppError("CANCELLED", "Execution was cancelled.", 409)
@@ -28,6 +34,9 @@ async def _pause(cancel: asyncio.Event, duration: float) -> None:
     raise AppError("CANCELLED", "Execution was cancelled.", 409)
 
 
+# Repeatedly ask Docker whether the app process is still running.
+# Require it to remain alive for the requested short interval within the startup deadline.
+# A process that starts and immediately exits must not count as a successful startup.
 async def observe_process(
     driver: DockerDriver,
     runtime: RuntimeHandle,
@@ -58,6 +67,10 @@ async def observe_process(
         delay = min(0.2, delay * 1.5)
 
 
+# Request only the app's allocated local HTTP address until its check passes or time runs out.
+# Check that the process survives before and after the response, without following redirects.
+# A general HTTP response proves reachability; an explicit health contract requires its configured
+# success status.
 async def probe_http(
     driver: DockerDriver,
     runtime: RuntimeHandle,
