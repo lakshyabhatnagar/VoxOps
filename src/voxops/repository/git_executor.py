@@ -230,7 +230,7 @@ class GitExecutor:
     # Checks its size before loading the bytes.
     def blob(self, path: Path, sha: str) -> bytes:
         size = int(self.run(path, "cat-file", "-s", sha))
-        if size > getattr(self.settings, "max_file_bytes", 131072):
+        if size > getattr(self.settings, "max_file_bytes", 1048576):
             raise AppError("source_too_large", "Tracked file exceeds the publication limit.", 409)
         return self.run(path, "cat-file", "blob", sha)
 

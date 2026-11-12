@@ -40,8 +40,11 @@ from voxops.workflows.stage1_graph import Stage1Workflow
 from voxops.workflows.stage2_graph import Stage2Graph
 
 
-# Copies accepted files from private storage into the project working copy.
-# Checks ownership, checksums, and secrets before safely replacing each file.
+# Write accepted generated files into the run's separate working copy.
+# Check the planned file owner, stored content hash, and currently applied parent before replacing
+# anything.
+# Use temporary files and safe directory handles so unexpected file changes cause an error instead
+# of silent overwriting.
 def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
     for key, result in sorted(run.tasks.items()):
         proposal = result.proposal
@@ -63,7 +66,7 @@ def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
         if digest(content) != proposal.content_hash:
             raise AppError("proposal_conflict", "Proposal content hash changed.", 409)
         check_secret(task.target_path, content)
-        current = safe_read(root, task.target_path)
+        current = safe_read(root, task.target_path, store.max_file_bytes)
         current_hash = digest(current) if current is not None else None
         parent = proposal.parent_hash
         if "parent_hash" not in proposal.model_fields_set:
@@ -130,13 +133,18 @@ def apply_proposals(root: Path, run: ArtifactRun, store: ArtifactStore) -> None:
                 os.close(descriptor)
 
 
-# Coordinates planning, creating, reviewing, and publishing project files.
-# Uses saved run state and a project lock to keep each operation consistent.
+# Coordinate planning, file generation, local verification, review, and approved branch
+# publication.
+# Reuse the existing generator, worktree manager, Docker runner, and Git publisher.
+# Save progress under the project's lock while keeping actual environment values in memory.
 class ArtifactService:
     _controls: dict[str, tuple[str, asyncio.Event]] = {}
 
-    # Connects settings, scan storage, and working copy management.
-    # Uses supplied file generator and publisher objects or creates the defaults.
+    # Connect the service to settings, scan storage, worktree management, generation, and
+    # publishing.
+    # Reuse supplied generator and publisher objects when tests or demos provide them.
+    # Create the environment manager and leave the Docker factory unset for normal production
+    # execution.
     def __init__(
         self,
         settings: Settings,
@@ -156,9 +164,14 @@ class ArtifactService:
         self.generator = generator or ArtifactGenerator(settings, self.store)
         self.publisher = publisher or GitPublisher(settings, self.store, worktrees)
         self.analysis = Stage1Workflow(settings, scans)
-        self.environment = EnvironmentManager()
+        self.environment = EnvironmentManager(max_file_bytes=settings.max_file_bytes)
         self.driver_factory = None
 
+    # Build an identifier for this process using its PID and Linux start information when
+    # available.
+    # The start information helps distinguish a new process that reused an old PID.
+    # Saved operation claims use this identifier when deciding whether an old owner may still be
+    # working.
     @staticmethod
     def _process_identity():
         pid = os.getpid()
@@ -168,6 +181,9 @@ class ArtifactService:
             start = "unknown"
         return f"{pid}:{start}"
 
+    # Check whether a saved process identifier still belongs to a live matching process.
+    # Compare the available start information as well as the PID.
+    # Recovery must not take ownership away from a process that is still executing this run.
     @staticmethod
     def _owner_alive(owner):
         try:
@@ -179,6 +195,9 @@ class ArtifactService:
         except (OSError, ValueError, IndexError):
             return False
 
+    # Reject a run that already has an active operation claim.
+    # Distinguish a live owner from an interrupted operation that needs recovery.
+    # This keeps two service requests from starting conflicting work on the same run.
     def _idle(self, run):
         if run.operation and self._owner_alive(run.operation.owner_process):
             raise AppError("verification_busy", "Another operation owns this run.", 409)
@@ -187,12 +206,20 @@ class ArtifactService:
                 "verification_interrupted", "Interrupted execution requires recovery.", 409
             )
 
+    # Reload the run and check that this operation still owns its claim.
+    # Compare the saved random epoch with the caller's epoch.
+    # If ownership changed, stop instead of saving updates from an older operation.
     def _claimed(self, run_id, epoch):
         run = self.store.load_run(run_id)
         if not run.operation or run.operation.epoch != epoch:
             raise AppError("verification_stale", "Execution ownership changed.", 409)
         return run
 
+    # Load and validate the run before reading or editing its environment configuration.
+    # Find both the original repository and candidate worktree and compare the current candidate
+    # identity.
+    # Return those checked paths and records so form operations do not proceed on stale or closed
+    # runs.
     def _environment_run(self, run_id: str, *, allow_active: bool = False):
         run = self.store.load_run(run_id)
         if not allow_active:
@@ -226,6 +253,11 @@ class ArtifactService:
             )
         return run, source, destination, inventory
 
+    # Create or restore the environment form while holding the project lock.
+    # If this is the first form, invalidate old verification and attach the new form to the
+    # candidate identity.
+    # Save only the form and state changes; actual configuration values remain in the manager's
+    # memory.
     def prepare_environment(self, run_id: str):
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -245,6 +277,9 @@ class ArtifactService:
             self.store.save_run(run)
             return form
 
+    # Return the refreshed form for the current candidate under the project lock.
+    # Let the environment manager detect changed local files or a lost session.
+    # Save any resulting invalidation even if refreshing the form raises an error.
     def environment_form(self, run_id: str):
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -254,6 +289,10 @@ class ArtifactService:
             finally:
                 self.store.save_run(run)
 
+    # Accept values only for the current form and candidate.
+    # Let the environment manager check the submitted form comparison code and values.
+    # Save any changed field states or verification invalidation without storing the submitted
+    # values themselves.
     def submit_environment(self, run_id: str, expected_digest: str, values: dict[str, str]):
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -263,6 +302,9 @@ class ArtifactService:
             finally:
                 self.store.save_run(run)
 
+    # Check that current configuration still supports this run's verification or publication.
+    # Optionally require the same generation marker that the completed checks used.
+    # Save any invalidation discovered while making that comparison.
     def environment_authority(self, run_id: str, expected_generation: str | None = None):
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -272,6 +314,10 @@ class ArtifactService:
             finally:
                 self.store.save_run(run)
 
+    # Forget one run's in-memory configuration after confirming no operation owns it.
+    # Invalidate the final report, review, and approval that depended on those values.
+    # Mark previously resolved fields missing so a later refresh must establish their values
+    # again.
     def clear_environment(self, run_id: str):
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -285,8 +331,10 @@ class ArtifactService:
                         item.resolution = "missing"
                 self.store.save_run(run)
 
-    # Scans the project and makes a plan from the chosen strategies and source edits.
-    # Checks that the source stayed unchanged during the scan, then saves the plan.
+    # Analyze the selected repository and create the requested file-generation plan.
+    # Check that the source stayed unchanged while analysis ran.
+    # Save the resulting plan so starting a run uses these reviewed choices rather than new
+    # guesses.
     async def plan(
         self,
         value: str,
@@ -302,7 +350,10 @@ class ArtifactService:
         with self.store.project_lock(fingerprint(source)):
             before, _ = capture_source(source, self.settings.max_file_bytes)
             analysis = await self.analysis.analyze(str(source))
-            plan = build_plan(source, analysis, strategies, provider, patches)
+            plan = build_plan(
+                source, analysis, strategies, provider, patches,
+                max_file_bytes=self.settings.max_file_bytes,
+            )
             if capture_source(source, self.settings.max_file_bytes)[0] != before:
                 raise AppError("source_changed", "Source changed during analysis; plan again.", 409)
             self.store.records.write(
@@ -317,8 +368,10 @@ class ArtifactService:
             )
             return plan
 
-    # Starts a saved plan for the chosen repository owner and name.
-    # Checks the source and open questions, saves the run, and begins publication checks.
+    # Create a saved run from an existing file-generation plan and GitHub target.
+    # Check source identity and bind the run to its original repository.
+    # Prepare the existing baseline/source-review path before generation proceeds in a separate
+    # worktree.
     async def start(
         self, plan_id: str, owner: str, name: str, selected_paths: list[str] | None = None
     ) -> ArtifactRun:
@@ -359,8 +412,10 @@ class ArtifactService:
                 self.store.save_run(run)
             return run
 
-    # Updates which source files are selected for a run.
-    # Repeats the appropriate publication checks before the working copy is prepared.
+    # Record which original source paths the user wants included in the run.
+    # Reject selection changes after a worktree or later execution state has been prepared.
+    # Create the appropriate source review using the existing publisher rather than committing
+    # unreviewed edits.
     async def select_source(self, run_id: str, paths: list[str]) -> ArtifactRun:
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -379,6 +434,9 @@ class ArtifactService:
             self.store.save_run(run)
             return run
 
+    # Count requests and tokens across every task's saved model attempts.
+    # Include failed repair calls even though their proposed contents were not accepted.
+    # Update the run summary without replacing its accepted file proposals.
     def _record_model_usage(self, run: ArtifactRun) -> None:
         """Count model requests and tokens from the saved attempts for every task.
 
@@ -398,6 +456,10 @@ class ArtifactService:
             output_tokens=sum(attempt.usage.output_tokens for attempt in attempts),
         )
 
+    # Continue a run through generation, environment setup, and local verification.
+    # Use a separate worktree, claim ownership, and reuse existing generated files and attempt
+    # records.
+    # Return when input or approval is needed, or when verification has produced the final review.
     async def execute(self, run_id: str) -> ArtifactRun:
         previous = self.store.load_run(run_id)
         if (previous.operation and not self._owner_alive(previous.operation.owner_process)) or (
@@ -439,7 +501,7 @@ class ArtifactService:
                         path = destination / relative
                         if path.is_dir() and not path.is_symlink():
                             continue
-                        if safe_read(destination, relative) is None:
+                        if safe_read(destination, relative, self.settings.max_file_bytes) is None:
                             raise AppError(
                                 "required_source_missing",
                                 "Selected baseline/snapshot omits a required build input.",
@@ -535,6 +597,10 @@ class ArtifactService:
                 self.store.save_run(run)
             self._controls.pop(run_id, None)
 
+    # Take over a run only after its former owner is no longer active.
+    # Use saved ownership records to remove leftover Docker resources and mark running attempts
+    # interrupted.
+    # Release the recovery claim afterward, and report cleanup that could not be completed.
     async def _recover(self, previous):
         with self.store.project_lock(previous.repo_fingerprint):
             run = self.store.load_run(previous.run_id)
@@ -547,6 +613,9 @@ class ArtifactService:
             resources = list(run.execution.resources) if run.execution else []
             self.store.save_run(run)
 
+        # Save a resource's latest cleanup state while recovery owns the run.
+        # Replace the record with the same resource name instead of appending duplicate versions.
+        # This lets another recovery attempt see which resources still need removal.
         def journal(item):
             with self.store.project_lock(run.repo_fingerprint):
                 current = self._claimed(run.run_id, epoch)
@@ -582,6 +651,11 @@ class ArtifactService:
                 current.operation = None
                 self.store.save_run(current)
 
+    # Run the existing execution plan and save progress through callbacks.
+    # If a supported failure permits repair, reuse the same Stage 2 task and bounded attempt
+    # history.
+    # Stop with missing configuration, failure, or a new final review whose report matches the
+    # checked candidate.
     async def _verify(self, run_id, epoch, destination, cancel):
         initial = self.store.load_run(run_id)
         project = initial.repo_fingerprint
@@ -617,6 +691,9 @@ class ArtifactService:
                 plan = execution.plan.model_copy(deep=True)
                 self.store.save_run(run)
 
+            # Reload the run under the project lock before saving an execution callback.
+            # Require the same source tree, configuration markers, and operation owner.
+            # Reject a stale callback rather than letting old Docker work certify changed inputs.
             def update(mutator, expected_tree=expected_tree, session=session):
                 with self.store.project_lock(project):
                     current = self._claimed(run_id, epoch)
@@ -629,14 +706,28 @@ class ArtifactService:
                     mutator(current.execution)
                     self.store.save_run(current)
 
+            # Forward a Docker resource update through the checked run-update path.
+            # Use the resource's generated name to find its existing record.
+            # The saved run then tracks cleanup progress without the driver writing storage
+            # directly.
             def journal(item):
+                # Replace any older resource record with the same name.
+                # Store a copy of the new state in the execution's resource list.
+                # This preserves one current record for recovery and final cleanup checks.
                 def record(state):
                     state.resources = [r for r in state.resources if r.name != item.name]
                     state.resources.append(item.model_copy(deep=True))
 
                 update(record)
 
+            # Save concrete execution settings discovered while preparing an app.
+            # For example, the runner may now know the exact builder image ID and tool versions.
+            # Update the app's job input codes so attempts refer to those finalized inputs.
             def prepared(item):
+                # Replace this app's saved execution specification with the prepared version.
+                # Apply its final input comparison code to all of its planned jobs.
+                # The saved plan and subsequent attempt records now describe the same tools and
+                # configuration.
                 def record(state):
                     state.plan.units[item.spec.unit_id] = item.spec
                     for task in state.plan.tasks.values():
@@ -645,7 +736,14 @@ class ArtifactService:
 
                 update(record)
 
+            # Send a running or completed attempt to the checked update path.
+            # Locate the history list for the attempt's task.
+            # Replacing by attempt ID lets progress updates complete an existing attempt without
+            # counting it twice.
             def attempt(item):
+                # Remove the older saved version of this attempt, if present.
+                # Append the newest version to its task's history.
+                # This records status changes while keeping distinct retries as separate attempts.
                 def record(state):
                     entries = state.attempts.setdefault(item.task_id, [])
                     entries[:] = [a for a in entries if a.attempt_id != item.attempt_id]
@@ -653,9 +751,16 @@ class ArtifactService:
 
                 update(record)
 
+            # Save one app's completed verification result through the checked callback path.
+            # Use the app ID as its key in the execution record.
+            # Later review and repair decisions can inspect its checks and diagnostics.
             def unit(item):
                 update(lambda state: state.units.__setitem__(item.unit_id, item))
 
+            # Create the Docker driver for one app with this run's journal, cancellation, and
+            # redaction hooks.
+            # Use the supplied driver factory when a test or demo replaces the Docker boundary.
+            # Otherwise create the real driver that operates the local Docker daemon.
             def driver(unit_id, session=session, execution_id=execution.execution_id):
                 if self.driver_factory:
                     return self.driver_factory(unit_id, journal, cancel, session)
@@ -710,6 +815,8 @@ class ArtifactService:
                         else "passed"
                     )
                     execution.status = status
+                    run.warnings.extend(f"Resolved earlier error: {error}" for error in run.errors)
+                    run.errors = []
                     attestation = ExecutionAttestation(
                         identity=execution.identity, status=status, units=outcome.units
                     )
@@ -797,6 +904,9 @@ class ArtifactService:
                 )
                 self.store.save_run(run)
 
+    # Signal cancellation to the currently controlled execution, if one exists.
+    # For an inactive run, check ownership and use recovery when leftover work needs cleanup.
+    # Return the saved state rather than starting unrelated generation or publication work.
     async def cancel_execution(self, run_id: str):
         control = self._controls.get(run_id)
         if control:
@@ -812,8 +922,9 @@ class ArtifactService:
             self.store.save_run(run)
             return run
 
-    # Records a person's decision on a specific review of the run.
-    # Checks the source under the project lock and saves the decision.
+    # Record approval or rejection for the exact displayed review and comparison code.
+    # Pass any incomplete-verification acknowledgement to the existing review validation.
+    # Save the decision so publication can require it later.
     def approve(
         self,
         run_id: str,
@@ -831,8 +942,10 @@ class ArtifactService:
             self.store.save_run(run)
             return run
 
-    # Publishes the approved run using the Git publisher under the project lock.
-    # Saves the resulting state or records an error if publication fails.
+    # Publish through the existing Git publisher only after checking the current run state.
+    # When execution exists, supply a final configuration check that runs at publication
+    # boundaries.
+    # Save errors or the resulting branch information without deploying an application.
     async def publish(self, run_id: str) -> ArtifactRun:
         previous = self.store.load_run(run_id)
         with self.store.project_lock(previous.repo_fingerprint):
@@ -843,6 +956,11 @@ class ArtifactService:
                     source = self.publisher.source(run)
                     destination = Path(self.worktrees.inspect(run.worktree_id).location)
 
+                    # Recheck that the configuration session still matches the markers used during
+                    # verification.
+                    # Use both the original repository and current candidate paths for that check.
+                    # The publisher calls this before committing and pushing so changed or lost
+                    # values cannot reuse old approval.
                     def authority():
                         self.environment.authority(
                             run, source, destination, run.execution.config_generations
@@ -855,5 +973,7 @@ class ArtifactService:
                 run.errors = [error.category]
                 self.store.save_run(run)
                 raise
+            run.warnings.extend(f"Resolved earlier error: {error}" for error in run.errors)
+            run.errors = []
             self.store.save_run(run)
             return run

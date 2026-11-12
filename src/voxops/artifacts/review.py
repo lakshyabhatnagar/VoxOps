@@ -22,6 +22,7 @@ POLICY_FILES = (
     "artifacts/review.py",
     "artifacts/security.py",
     "artifacts/validators.py",
+    "artifacts/ci_actions.py",
     "artifacts/planner.py",
     "artifacts/service.py",
     "domain/artifact_models.py",
@@ -38,8 +39,9 @@ POLICY_CODE = digest(
 )
 
 
-# Makes a checksum for the code and settings used to check and publish files.
-# Changes to those checks or the configured GitHub endpoint change the checksum.
+# Calculate a comparison code for the checking and publication rules and relevant settings.
+# Include Stage 3 execution rules alongside the existing file and Git checks.
+# An approval created under different rules must not silently authorize a later run.
 def policy_fingerprint(settings) -> str:
     return digest(
         {
@@ -52,14 +54,17 @@ def policy_fingerprint(settings) -> str:
     )
 
 
-# Makes a checksum of the review details and displayed changes.
-# Leaves out the checksum field itself so the result can be checked later.
+# Calculate a comparison code for the exact review contents.
+# Leave out the digest field itself.
+# The approval request uses this value to prove which displayed changes the user approved.
 def review_digest(review: ChangeReview) -> str:
     return digest(review.model_dump(mode="json", exclude={"digest"}))
 
 
-# Creates a two-hour review for the selected files and their displayed changes.
-# Records the source, destination, checks, and actions, then saves it on the run.
+# Create a time-limited review of the selected files, diff, target repository, and expected
+# actions.
+# For final publication, attach a copy of the candidate's current verification report.
+# Save the review on the run and calculate its comparison code before asking for approval.
 def build_review(
     run: ArtifactRun,
     purpose: str,
@@ -106,8 +111,9 @@ def build_review(
     return review
 
 
-# Compares the reviewed repository with the run's current repository details.
-# Allows a missing ID or URL to be filled in while preserving the reviewed identity.
+# Compare the repository target in a review with the run's current target.
+# Permit supported metadata that was previously missing to be filled in.
+# Reject changes that would send approved contents to a different destination.
 def target_matches(review: ChangeReview, run: ArtifactRun) -> bool:
     old, new = review.target, run.target
     return (
@@ -120,8 +126,9 @@ def target_matches(review: ChangeReview, run: ArtifactRun) -> bool:
     )
 
 
-# Checks that a review is unexpired and still matches the current run.
-# Raises an error if its checksum, plan, source, branch, or destination has changed.
+# Check that the saved review still describes this run and plan.
+# Compare its source, destination, policy, expiry, and content comparison code.
+# Reject a changed or expired review before it can support approval or publication.
 def validate_review(run: ArtifactRun, review: ChangeReview) -> None:
     if (
         review.digest != review_digest(review)
@@ -139,8 +146,9 @@ def validate_review(run: ArtifactRun, review: ChangeReview) -> None:
         raise AppError("stale_review", "Review changed or expired; request a new review.", 409)
 
 
-# Records an approval or rejection for the specified review and checksum.
-# Rejects changed reviews and conflicting decisions, and updates the run status.
+# Record a decision for the exact reviewed contents, not just a run ID.
+# Check incomplete-verification acknowledgement when approving a report with missing checks.
+# Reject conflicting repeat decisions and save the accepted decision with its review identity.
 def approve_review(
     run: ArtifactRun,
     review_id: str,
@@ -185,8 +193,9 @@ def approve_review(
     return approval
 
 
-# Finds the newest review for the requested purpose and checks its approval.
-# Returns the review only when its matching approval is still valid.
+# Find the applicable review and saved approval for a particular action.
+# Revalidate that review and require a matching approving decision.
+# Return the reviewed contents only when they still authorize the operation about to run.
 def require_approval(run: ArtifactRun, purpose: str) -> ChangeReview:
     if run.status in {"rejected", "cancelled"}:
         raise AppError("approval_rejected", "This run has been rejected or cancelled.", 409)

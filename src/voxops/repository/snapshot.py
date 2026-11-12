@@ -57,7 +57,7 @@ def source_exclusions(source: Path) -> list[str]:
 
 # Records the files eligible for a source snapshot.
 # Skips excluded paths and links while recording file checksums and permissions.
-def capture_source(source: Path, max_bytes: int = 131072) -> tuple[str, dict[str, dict]]:
+def capture_source(source: Path, max_bytes: int = 1048576) -> tuple[str, dict[str, dict]]:
     inventory = {}
     visited = 0
     for folder, dirs, files in os.walk(source, followlinks=False):

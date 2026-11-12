@@ -47,12 +47,13 @@ class ModelBudget:
         self.reserved = 0
         self.lock = asyncio.Lock()
 
-    # Reserves tokens and one request for a file job before calling the AI.
-    # Raises an error when the run has no request or sufficient token budget left.
+    # Reserve at most one third of a file job's allowance for each model request.
+    # An interrupted request still counts as spent, but cannot consume all three shares.
+    # Keep the shared run budget and request limit enforced across concurrent jobs.
     async def reserve(self, task_remaining: int) -> int:
         async with self.lock:
             available = self.settings.artifact_max_tokens - self.tokens - self.reserved
-            allocation = min(task_remaining, available)
+            allocation = min(task_remaining, available, self.settings.artifact_task_tokens // 3)
             if self.requests >= self.settings.artifact_max_requests or allocation < 1000:
                 raise AppError("model_budget_exhausted", "Artifact model budget is exhausted.", 409)
             self.requests += 1
@@ -81,8 +82,10 @@ class ArtifactGenerator:
     def record_name(self, run_id: str, task_id: str) -> str:
         return f"artifact-task-{self.store.identifier(run_id)}-{digest(task_id.encode())}.json"
 
-    # Loads the saved result and attempts for one file job.
-    # Returns a pending result when no record exists and rejects invalid records.
+    # Load one file job's saved result and model-attempt history.
+    # Return a pending result if that job has never been saved.
+    # Repairs and budgets read this same record so resuming cannot reset the number of content
+    # attempts.
     def previous(self, run_id: str, task: ArtifactTask) -> TaskResult:
         path = self.store.directory / self.record_name(run_id, task.task_id)
         try:
@@ -119,8 +122,9 @@ class ArtifactGenerator:
             and not any(item.status in {"failed", "needs_review"} for item in findings)
         )
 
-    # Checks a file for secrets and saves its contents privately.
-    # Returns its destination, checksums, creator, and check results for later use.
+    # Save checked file text privately and return the record describing where it belongs.
+    # Check for secrets and record content, original, and expected parent hashes.
+    # The service later verifies those hashes before applying the text to its separate worktree.
     def proposal(
         self,
         task: ArtifactTask,
@@ -144,9 +148,12 @@ class ArtifactGenerator:
             validations=findings,
         )
 
-    # Keeps an existing file when it passes the checks, otherwise asks the AI to fix it.
-    # Checks proposed replacements for file size, secrets, and rules for the requested file type.
-    # Saves attempts and checked file contents privately so they can be reviewed before use.
+    # Validate existing content or ask the model to produce a checked replacement for one file
+    # job.
+    # For an execution-driven repair, verify the already applied proposal and pass bounded
+    # diagnostic feedback.
+    # Reuse the task's saved attempts and budget; successful or failed repair calls count toward
+    # the same three-attempt limit.
     async def generate(
         self,
         run_id: str,
@@ -290,9 +297,12 @@ class ArtifactGenerator:
                             usage_limits=UsageLimits(
                                 request_limit=1, total_tokens_limit=allocation
                             ),
-                            model_settings={"max_tokens": min(8192, allocation // 2)},
+                            model_settings={
+                                "max_tokens": min(8192, allocation // 2),
+                                "timeout": self.settings.artifact_model_timeout,
+                            },
                         ),
-                        self.settings.model_timeout,
+                        self.settings.artifact_model_timeout,
                     )
                 output = response.output
                 if output.target_path != task.target_path:

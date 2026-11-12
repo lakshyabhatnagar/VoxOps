@@ -16,9 +16,9 @@ from voxops.storage.artifact_store import digest
 
 # Creates a file job from the supplied fields and checks its destination.
 # Marks an existing file for checking and records a checksum of its contents.
-def planned_task(root: Path, **fields) -> ArtifactTask:
+def planned_task(root: Path, *, max_file_bytes: int = 1048576, **fields) -> ArtifactTask:
     target = fields["target_path"]
-    content = safe_read(root, target)
+    content = safe_read(root, target, max_file_bytes)
     return ArtifactTask(
         **fields,
         operation="validate" if content is not None else "create",
@@ -34,12 +34,24 @@ def build_plan(
     strategies: dict[str, Strategy],
     provider: str | None = None,
     patches: list[SourcePatchSpec] | None = None,
+    *,
+    max_file_bytes: int = 1048576,
 ) -> ArtifactPlan:
     units = analysis.detected_units
     ids = {unit.id for unit in units}
     if not units or set(strategies) != ids:
         raise AppError("strategy_required", "Choose a strategy for every detected unit.", 409)
-    questions = list(analysis.unresolved_ambiguities)
+    ssr_question = "No static export: confirm SSR/runtime requirements."
+    confirmed = {
+        unit.id for unit in units
+        if unit.framework == Framework.NEXT
+        and strategies[unit.id] in {"native", "container"}
+        and unit.runtime.build_command and unit.runtime.start_command
+    }
+    answered = {
+        f"{unit.root_path}: {ssr_question}" for unit in units if unit.id in confirmed
+    }
+    questions = [q for q in analysis.unresolved_ambiguities if q not in answered]
     if any(
         any(word in warning.lower() for word in ("truncat", "limit", "incomplete"))
         for warning in analysis.scan.warnings
@@ -59,7 +71,10 @@ def build_plan(
             and unit.role != Role.STATIC
         ):
             raise AppError("unsupported_strategy", "Strategy conflicts with detected runtime.", 409)
-        questions.extend(unit.detection.unresolved_questions)
+        questions.extend(
+            q for q in unit.detection.unresolved_questions
+            if not (unit.id in confirmed and q == ssr_question)
+        )
         if strategy == "static" and not unit.runtime.build_command:
             questions.append(f"Unit {unit.id} has no known static build command.")
         if strategy != "container":
@@ -94,6 +109,7 @@ def build_plan(
         )
         task = planned_task(
             root,
+            max_file_bytes=max_file_bytes,
             task_id=f"docker-{unit.id}",
             unit_id=unit.id,
             artifact_type="dockerfile",
@@ -115,6 +131,7 @@ def build_plan(
         required = sorted({path for task in tasks.values() for path in task.required_paths})
         tasks["dockerignore"] = planned_task(
             root,
+            max_file_bytes=max_file_bytes,
             task_id="dockerignore",
             artifact_type="dockerignore",
             target_path=".dockerignore",
@@ -124,6 +141,7 @@ def build_plan(
         )
     tasks["gitignore"] = planned_task(
         root,
+        max_file_bytes=max_file_bytes,
         task_id="gitignore",
         artifact_type="gitignore",
         target_path=".gitignore",
@@ -146,6 +164,7 @@ def build_plan(
     )
     tasks["ci"] = planned_task(
         root,
+        max_file_bytes=max_file_bytes,
         task_id="ci",
         artifact_type="ci",
         target_path=".github/workflows/ci.yml",
@@ -180,11 +199,12 @@ def build_plan(
                 "unsafe_patch", "Source patches require an approved source/config file.", 409
             )
         check_secret(patch.target_path, (patch.reason + patch.correction).encode())
-        original = safe_read(root, patch.target_path)
+        original = safe_read(root, patch.target_path, max_file_bytes)
         if original is None or digest(original) != patch.expected_hash:
             raise AppError("source_changed", "Source patch hash does not match its evidence.", 409)
         task = planned_task(
             root,
+            max_file_bytes=max_file_bytes,
             task_id=f"patch-{index}",
             artifact_type="source_patch",
             target_path=patch.target_path,

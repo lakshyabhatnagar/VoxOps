@@ -61,8 +61,10 @@ class ValidationResult(Model):
     duration_ms: int = 0
 
 
-# Describes one job, such as making a Dockerfile, and says where the file belongs.
-# Lists the files the job needs, the jobs it must wait for, and its three-try limit.
+# Describe one planned file job, such as creating a Dockerfile.
+# List the destination, source files it needs, earlier jobs it depends on, and its three-content-
+# attempt limit.
+# Stage 3 repairs reuse this same job instead of creating a fresh allowance for more model calls.
 class ArtifactTask(Model):
     task_id: str
     unit_id: str | None = None
@@ -141,7 +143,7 @@ class ContextPacket(Model):
 # Includes its path and contents, plus any explanation, assumptions, and questions.
 class ArtifactOutput(Model):
     target_path: str
-    content: str = Field(max_length=131072)
+    content: str = Field(max_length=1048576)
     explanation: str = Field(default="", max_length=2000)
     assumptions: list[str] = Field(default_factory=list, max_length=20)
     questions: list[str] = Field(default_factory=list, max_length=20)
@@ -149,8 +151,9 @@ class ArtifactOutput(Model):
     _path = field_validator("target_path")(artifact_path)
 
 
-# Records one request to the AI for a file job.
-# Keeps its timing, token use, checks, result, and checksums for later inspection.
+# Record one model request for a file job.
+# Keep timing, token usage, validation feedback, and the outcome of that particular try.
+# Generation and later execution-driven repairs append to this same bounded history.
 class ArtifactAttempt(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
@@ -168,8 +171,11 @@ class ArtifactAttempt(Model):
     error_category: str | None = None
 
 
-# Describes a checked file saved privately for possible use in the project.
-# Records its destination, content checksum, original checksum, and check results.
+# Point to checked file text saved in VoxOps's private storage.
+# Keep its intended destination and hashes of the proposed, original, and expected parent
+# contents.
+# Applying a repair checks that parent so it cannot overwrite a file changed since the proposal
+# was prepared.
 class ArtifactProposal(Model):
     schema_version: Literal["1"] = "1"
     task_id: str
@@ -183,13 +189,18 @@ class ArtifactProposal(Model):
     validations: list[ValidationResult] = Field(default_factory=list)
 
 
+# Describe a request to correct an already applied generated file.
+# Name the exact applied content hash and provide bounded failure feedback.
+# The generator verifies that authority before spending another attempt on the existing task.
 class RepairIntent(Model):
     expected_applied_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     feedback: str = Field(min_length=1, max_length=2000)
 
 
-# Holds the current outcome of one file job.
-# Includes the saved file, check results, attempts, and any error category.
+# Keep one file job's accepted proposal, validation results, attempt history, and current outcome.
+# A failed new repair may have saved attempts without replacing the run's accepted file proposal.
+# This distinction lets accounting include failed calls while file application still requires
+# checked content.
 class TaskResult(Model):
     schema_version: Literal["1"] = "1"
     task_id: str
@@ -224,8 +235,9 @@ class ReviewedFile(Model):
     _path = field_validator("path")(artifact_path)
 
 
-# Holds the exact files and changes presented for a publication decision.
-# Records the source, destination, checks, expiry time, and a checksum of the review.
+# Describe the exact file changes and actions shown to the user for a decision.
+# Include the destination, source versions, expiry, and comparison code.
+# For final publication, also attach the Stage 3 verification report the approval must match.
 class ChangeReview(Model):
     schema_version: Literal["1"] = "1"
     review_id: str
@@ -253,8 +265,10 @@ class ChangeReview(Model):
     attestation_digest: str | None = None
 
 
-# Records a person's approval or rejection of one review.
-# Includes the review checksum and the time the decision was made.
+# Save the user's approval or rejection of a particular review.
+# Keep the review comparison code so a later changed diff is not covered by this decision.
+# When verification is incomplete, retain the matching acknowledgement of the exact unverified
+# checks.
 class ApprovalRecord(Model):
     schema_version: Literal["1"] = "1"
     approval_id: str
@@ -279,8 +293,10 @@ class PublicationProgress(Model):
     remote_sha: str | None = None
 
 
-# Records the Git branch and commits that are ready for a later deployment.
-# Includes the approving review and confirms that deployment has not been run.
+# Record the repository, branch, and commit that Git publication actually verified.
+# Include the approved review and Stage 3 verification status and report when present.
+# The record explicitly says no deployment was executed, even though the branch is ready for a
+# later deployment.
 class GitPublishResult(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
@@ -298,14 +314,21 @@ class GitPublishResult(Model):
     published_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-# Holds the plan and progress for one run that prepares project files.
-# Tracks file jobs, reviews, approvals, publication progress, errors, and AI usage.
+# Record which process currently owns a run's execution or repair operation.
+# Give that operation a random epoch as well as its process identity.
+# Progress callbacks compare the epoch so an interrupted older operation cannot overwrite newer
+# state.
 class OperationClaim(Model):
     epoch: str
     owner_process: str
     kind: Literal["execute", "repair"]
 
 
+# Hold the saved progress for the complete file-generation and verification journey.
+# Connect the plan, accepted files, worktree, reviews, approvals, model usage, and publication
+# result.
+# Its execution field links Stage 3 evidence to the same run while actual environment values stay
+# in memory.
 class ArtifactRun(Model):
     schema_version: Literal["1"] = "1"
     run_id: str

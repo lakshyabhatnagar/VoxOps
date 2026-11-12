@@ -26,9 +26,11 @@ from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
 
-def integration_fixture(tmp_path):
+def integration_fixture(tmp_path, *, large_lockfile=False):
     source = copy_fixture(tmp_path, "vite_only")
     (source / ".env.example").unlink()
+    if large_lockfile:
+        (source / "pnpm-lock.yaml").write_text("lockfileVersion: 9.0\n# " + "x" * 187294)
     (source / "config.js").write_text(
         'if (!process.env.VITE_REQUIRED) throw new Error("required");\n'
     )
@@ -87,8 +89,9 @@ def integration_fixture(tmp_path):
     return service, run, bare
 
 
-def test_api_environment_verification_review_and_local_push(tmp_path):
-    service, run, bare = integration_fixture(tmp_path)
+@pytest.mark.parametrize("large_lockfile", [False, True])
+def test_api_environment_verification_review_and_local_push(tmp_path, large_lockfile):
+    service, run, bare = integration_fixture(tmp_path, large_lockfile=large_lockfile)
     app = create_app(service.settings)
     app.state.artifacts = service
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
@@ -123,6 +126,9 @@ def test_api_environment_verification_review_and_local_push(tmp_path):
         )
         result = request("POST", "/execute")
         assert result["execution"]["status"] == "passed", result["errors"]
+        premature = client.post(prefix + "/publish")
+        assert premature.status_code == 409
+        assert service.store.load_run(run.run_id).errors == ["approval_required"]
         review = request("GET", "/review")["review"]
         request(
             "POST",
@@ -136,6 +142,8 @@ def test_api_environment_verification_review_and_local_push(tmp_path):
         published = request("POST", "/publish")
         assert published["result"]["remote_sha"] == published["result"]["commit_sha"]
         assert published["result"]["deployment_executed"] is False
+        assert published["errors"] == []
+        assert "Resolved earlier error: approval_required" in published["warnings"]
         assert "synthetic-secret-value" not in str(published)
         assert (
             git(bare, "rev-parse", f"refs/heads/{run.branch}").decode().strip()

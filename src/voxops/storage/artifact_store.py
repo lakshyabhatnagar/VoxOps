@@ -31,7 +31,7 @@ class ArtifactStore:
     # Sets up storage for runs and generated files.
     # Applies separate limits to each file and the total saved content.
     def __init__(
-        self, directory: Path, max_file_bytes: int = 131072, max_staged_bytes: int = 8388608
+        self, directory: Path, max_file_bytes: int = 1048576, max_staged_bytes: int = 8388608
     ):
         self.records = ScanStore(directory)
         self.directory = self.records.directory

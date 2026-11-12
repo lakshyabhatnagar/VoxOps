@@ -21,6 +21,9 @@ from voxops.domain.execution_models import (
 from voxops.storage.artifact_store import digest
 
 
+# Calculate a comparison code for the verification code and relevant settings.
+# Include the implementation files that decide what counts as a successful or safe check.
+# Changing those files or limits makes old verification evidence need a fresh comparison.
 def execution_policy_fingerprint(settings: Settings) -> str:
     root = Path(__file__).resolve().parents[1]
     # Include new adapters automatically: changing interpretation invalidates old evidence.
@@ -36,6 +39,7 @@ def execution_policy_fingerprint(settings: Settings) -> str:
             root / "artifacts/context_builder.py",
             root / "artifacts/security.py",
             root / "artifacts/validators.py",
+            root / "artifacts/ci_actions.py",
             root / "artifacts/patcher.py",
         }
     )
@@ -54,6 +58,9 @@ def execution_policy_fingerprint(settings: Settings) -> str:
     )
 
 
+# Give this exact candidate and execution plan a reproducible comparison record.
+# Combine repository state, selected files, environment-form structure, and verification rules.
+# Do not include secret values; use this record to stop old results approving different code.
 def candidate_identity(
     run: ArtifactRun,
     inventory: Mapping[str, Mapping[str, str]],
@@ -113,10 +120,16 @@ def candidate_identity(
     return CandidateIdentity(**payload, digest=digest(payload))
 
 
+# Calculate a comparison code for a saved verification report.
+# Leave out the report's own digest field to avoid including the answer in its input.
+# Reviews and approvals use this to name the exact report the user saw.
 def attestation_digest(attestation: ExecutionAttestation) -> str:
     return digest(attestation.model_dump(mode="json", exclude={"digest"}))
 
 
+# Calculate a comparison code for one app's verification inputs.
+# Include its own jobs and all jobs that those jobs depend on.
+# This prevents an unchanged app result from being reused after a required upstream input changes.
 def unit_input_digest(plan: ExecutionPlan, unit_id: str) -> str:
     task_ids = {key for key, task in plan.tasks.items() if task.unit_id == unit_id}
     pending = list(task_ids)
@@ -133,6 +146,9 @@ def unit_input_digest(plan: ExecutionPlan, unit_id: str) -> str:
     )
 
 
+# List the required checks that did not pass in a verification report.
+# Use stable app-and-check names so the user can acknowledge the exact missing checks.
+# A general acknowledgement cannot stand in for a different list of unverified behavior.
 def missing_check_ids(attestation: ExecutionAttestation) -> list[str]:
     return sorted(
         f"{unit.unit_id}:{kind}"
@@ -142,6 +158,9 @@ def missing_check_ids(attestation: ExecutionAttestation) -> list[str]:
     )
 
 
+# Check the user's acknowledgement when verification is incomplete.
+# Require it to name this exact review, report, and set of missing checks.
+# Reject missing, stale, or unnecessary acknowledgements instead of accepting a vague approval.
 def validate_acknowledgement(
     review: ChangeReview,
     acknowledgement: IncompleteAcknowledgement | None,
@@ -166,6 +185,9 @@ def validate_acknowledgement(
         )
 
 
+# Perform the final comparison between the files, verification report, and approved review.
+# Check app results, recorded attempts, configuration markers, and outstanding resource cleanup.
+# Reject publication when any of those records no longer support the exact branch contents.
 def require_publishable(
     run: ArtifactRun,
     review: ChangeReview,
