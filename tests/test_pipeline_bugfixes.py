@@ -22,6 +22,7 @@ from voxops.execution.runner import ExecutionRunner
 from voxops.repository.filesystem_scanner import source_evidence
 from voxops.repository.snapshot import capture_source
 from voxops.storage.artifact_store import ArtifactStore
+from voxops.storage.mongodb import database_for
 
 
 # Ordinary password validation and token processing contain no credential values.
@@ -148,8 +149,8 @@ def test_failed_command_preserves_redacted_tail():
 # Check that Stage 2 uses its separate timeout and gives the model verified CI references.
 def test_timeout_leaves_budget_for_resume(tmp_path, monkeypatch):
     root, _, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
-    settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    settings = settings_for(tmp_path, llm_call_retries=0)
+    store = ArtifactStore(database_for(settings))
     packets, deadlines = [], []
     agent = offline_agent(lambda packet, content: packets.append(packet) or content)
     generator = ArtifactGenerator(settings, store, agent)

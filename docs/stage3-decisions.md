@@ -1,5 +1,9 @@
 # Stage 3 implementation decisions
 
+Historical Stage 1–3 evidence below describes the original implementation. Stage 4
+replaces operational JSON files and filesystem locks with MongoDB records and a
+single-process execution boundary. See [Stage 4 decisions](stage4-decisions.md).
+
 - Verification belongs before the final Stage 2 artifact review. Initial baseline approval remains
   separate. `GitPublisher` remains the only commit/push owner.
 - Existing adapters, Docker execution, environment discovery, and content workers are reused.

@@ -8,8 +8,9 @@ from uuid import uuid4
 
 import pytest
 from conftest import settings_for
-from demo_stage2 import FakeGitHub, LocalGit
+from domain_steps import artifact_step
 from fastapi.testclient import TestClient
+from pipeline_fixtures import FakeGitHub, LocalGit
 from simulated_docker import DemoDocker
 from test_artifact_generation import offline_agent
 from test_stage2_git import git
@@ -43,7 +44,13 @@ CASES = [
 # Require the expected status and return JSON so each case can check the next step.
 # Include response text on failure to make a broken gate understandable from pytest output.
 def api(client, method, path, body=None, status=200):
-    response = client.request(method, path, json=body)
+    response = (
+        artifact_step(
+            client, "advance" if method == "ADVANCE" else "publish", path.rsplit("/", 1)[-1]
+        )
+        if method in {"ADVANCE", "PUBLISH"}
+        else client.request(method, path, json=body)
+    )
     assert response.status_code == status, response.text
     return response.json()
 
@@ -101,7 +108,7 @@ def supply_environment(client, prefix, run):
         prefix + "/verification/env-values",
         {"schema_digest": form["schema_digest"], "values": values},
     )
-    return api(client, "POST", prefix + "/execute")
+    return api(client, "ADVANCE", prefix)
 
 
 # Exercise one pinned source revision with any earlier stage restored from local checkpoints.
@@ -204,8 +211,8 @@ def test_repository_pipeline(tmp_path, request: pytest.FixtureRequest, case):
                 )
             )
             plan.plan_id, plan.repo_fingerprint = uuid4().hex, fingerprint(source)
-            store.records.write(
-                f"artifact-plan-{plan.plan_id}.json",
+            store.save_plan(
+                plan.plan_id,
                 {
                     "schema_version": "1",
                     "plan": plan.model_dump(mode="json"),
@@ -225,7 +232,7 @@ def test_repository_pipeline(tmp_path, request: pytest.FixtureRequest, case):
         prefix = f"/api/v1/artifact-runs/{run['run_id']}"
         if run["status"] == "awaiting_source_publication":
             run = approve(client, prefix)
-        api(client, "POST", prefix + "/publish", status=409)
+        api(client, "PUBLISH", prefix, status=409)
         if stage in {"2", "3"}:
             saved = store.load_run(run["run_id"])
             asyncio.run(publisher.prepare(saved))
@@ -268,7 +275,7 @@ def test_repository_pipeline(tmp_path, request: pytest.FixtureRequest, case):
                     assert len(saved.tasks["ci"].attempts) == 2
                 assert capture_source(source)[0] == before
                 return
-        run = api(client, "POST", prefix + "/execute")
+        run = api(client, "ADVANCE", prefix)
         expected = metadata["expected_stage3"]
         if expected in {"blocked_unpinned_manager", "blocked_env_expression"}:
             error = (
@@ -280,20 +287,20 @@ def test_repository_pipeline(tmp_path, request: pytest.FixtureRequest, case):
             assert run["execution"] is None
             if case == "next_database" and stage != "3":
                 assert len(run["tasks"]["ci"]["attempts"]) == 2
-            api(client, "POST", prefix + "/publish", status=409)
+            api(client, "PUBLISH", prefix, status=409)
         elif expected == "waiting_for_env":
             assert run["execution"]["status"] == "waiting_for_env"
             form = api(client, "GET", prefix + "/verification/env-form")
             assert any(
                 a["path"] == "fastapi_example/config.py" for a in form["schema"]["ambiguities"]
             )
-            api(client, "POST", prefix + "/publish", status=409)
+            api(client, "PUBLISH", prefix, status=409)
         else:
             run = supply_environment(client, prefix, run)
             assert run["execution"] and run["execution"]["status"] == expected, run["errors"]
-            api(client, "POST", prefix + "/publish", status=409)
+            api(client, "PUBLISH", prefix, status=409)
             approve(client, prefix)
-            published = api(client, "POST", prefix + "/publish")
+            published = api(client, "PUBLISH", prefix)
             receipt = published["result"]
             assert (
                 git(remote, "rev-parse", f"refs/heads/{receipt['branch']}").decode().strip()

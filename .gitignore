@@ -10,5 +10,6 @@ __pycache__/
 /.aws/
 /.codex/
 /GOAL*.md
+/goal.md
 .voxops/
 *.egg-info/

@@ -3,9 +3,11 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from anthropic import APIConnectionError as AnthropicConnectionError
 from langsmith import tracing_context
+from openai import APIConnectionError as OpenAIConnectionError
 from pydantic_ai import Agent, UsageLimits
-from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.usage import RunUsage
 
 from voxops.agents.artifact_agent import create_artifact_agent
@@ -77,34 +79,15 @@ class ArtifactGenerator:
         self.settings, self.store = settings, store
         self.agent = agent if agent is not None else create_artifact_agent(settings)
 
-    # Builds the storage filename for one run and file job.
-    # Uses the run ID and a checksum of the job ID to keep records separate.
-    def record_name(self, run_id: str, task_id: str) -> str:
-        return f"artifact-task-{self.store.identifier(run_id)}-{digest(task_id.encode())}.json"
-
-    # Load one file job's saved result and model-attempt history.
-    # Return a pending result if that job has never been saved.
-    # Repairs and budgets read this same record so resuming cannot reset the number of content
-    # attempts.
+    # Load this task's canonical MongoDB record and attempt history.
+    # An unsaved task starts pending, while retries retain earlier attempts.
     def previous(self, run_id: str, task: ArtifactTask) -> TaskResult:
-        path = self.store.directory / self.record_name(run_id, task.task_id)
-        try:
-            result = TaskResult.model_validate_json(path.read_text())
-            if result.task_id != task.task_id:
-                raise ValueError("Task mismatch")
-            return result
-        except FileNotFoundError:
-            return TaskResult(task_id=task.task_id, status="pending")
-        except (OSError, ValueError):
-            raise AppError("task_record_invalid", "Stored artifact task is invalid.", 409) from None
+        return self.store.load_task(run_id, task.task_id)
 
-    # Saves a file job's current result and attempts.
-    # Returns the same result after writing its record.
+    # Save only the current task rather than replacing the whole run document.
+    # Parallel artifact workers therefore cannot erase each other's progress.
     def persist(self, run_id: str, result: TaskResult) -> TaskResult:
-        self.store.records.write(
-            self.record_name(run_id, result.task_id), result.model_dump(mode="json")
-        )
-        return result
+        return self.store.save_task(run_id, result)
 
     # Creates a failed check result for a file job.
     # Includes the error category, message, and planned destination path.
@@ -164,9 +147,9 @@ class ArtifactGenerator:
         *,
         repair: RepairIntent | None = None,
     ) -> TaskResult:
-        result = self.previous(run_id, task)
+        result = await asyncio.to_thread(self.previous, run_id, task)
         if repair:
-            run = self.store.load_run(run_id)
+            run = await asyncio.to_thread(self.store.load_run, run_id)
             recorded = run.tasks.get(task.task_id)
             proposal = recorded.proposal if recorded else None
             if (
@@ -188,7 +171,7 @@ class ArtifactGenerator:
             return result
         if task.operation == "skip":
             result.status = "skipped"
-            return self.persist(run_id, result)
+            return await asyncio.to_thread(self.persist, run_id, result)
         try:
             original_bytes = safe_read(root, task.target_path, self.settings.max_file_bytes)
             current_hash = digest(original_bytes) if original_bytes is not None else None
@@ -232,40 +215,46 @@ class ArtifactGenerator:
                 )
                 if self.valid(findings):
                     result.status = "validated_existing"
-                    result.proposal = self.proposal(task, original, "existing", findings)
+                    result.proposal = await asyncio.to_thread(
+                        self.proposal, task, original, "existing", findings
+                    )
                     result.validations = findings
-                    return self.persist(run_id, result)
+                    return await asyncio.to_thread(self.persist, run_id, result)
                 result.validations = findings
                 if task.artifact_type == "gitignore":
                     repaired = repair_gitignore(original)
                     findings = validate_artifact(task, repaired, plan, root=root)
                     if self.valid(findings):
-                        result.proposal = self.proposal(
-                            task, repaired, "deterministic_patch", findings
+                        result.proposal = await asyncio.to_thread(
+                            self.proposal, task, repaired, "deterministic_patch", findings
                         )
                         result.status, result.validations = "passed", findings
-                        return self.persist(run_id, result)
+                        return await asyncio.to_thread(self.persist, run_id, result)
             if self.agent is None:
                 result.status, result.error_category = "blocked", "model_unavailable"
-                return self.persist(run_id, result)
+                return await asyncio.to_thread(self.persist, run_id, result)
             packet = build_context(root, task, plan, self.settings)
         except (UnicodeError, AppError) as error:
             result.status = "blocked"
             result.error_category = (
                 error.category if isinstance(error, AppError) else "invalid_text"
             )
-            return self.persist(run_id, result)
+            return await asyncio.to_thread(self.persist, run_id, result)
         previous = None
-        while len(result.attempts) < task.max_attempts:
+        workflow_id = await asyncio.to_thread(self.store.workflow_attempt, run_id)
+        current_attempts = [a for a in result.attempts if a.workflow_id == workflow_id]
+        transient_retries = 0
+        while len(current_attempts) < task.max_attempts:
             usage = RunUsage()
-            spent = sum(budget_charge(item) for item in result.attempts)
+            spent = sum(budget_charge(item) for item in current_attempts)
             try:
                 allocation = await budget.reserve(self.settings.artifact_task_tokens - spent)
             except AppError as error:
                 result.status, result.error_category = "blocked", error.category
-                return self.persist(run_id, result)
+                return await asyncio.to_thread(self.persist, run_id, result)
             attempt = ArtifactAttempt(
                 run_id=run_id,
+                workflow_id=workflow_id,
                 task_id=task.task_id,
                 attempt_number=len(result.attempts) + 1,
                 started_at=datetime.now(UTC),
@@ -275,7 +264,8 @@ class ArtifactGenerator:
                 usage=AIUsage(status="used", requests=1),
             )
             result.attempts.append(attempt)
-            self.persist(run_id, result)
+            current_attempts.append(attempt)
+            await asyncio.to_thread(self.persist, run_id, result)
             try:
                 prompt = json.dumps(
                     {
@@ -324,7 +314,8 @@ class ArtifactGenerator:
                 result.validations = findings
                 attempt.feedback = findings
                 if self.valid(findings):
-                    result.proposal = self.proposal(
+                    result.proposal = await asyncio.to_thread(
+                        self.proposal,
                         task,
                         output.content,
                         "llm",
@@ -338,7 +329,22 @@ class ArtifactGenerator:
                 attempt.error_category, result.status = "model_timeout", "blocked"
             except ModelHTTPError as error:
                 attempt.error_category = (
-                    "model_auth" if error.status_code in {401, 403} else "model_transport"
+                    "model_auth"
+                    if error.status_code in {401, 403}
+                    else (
+                        "model_transport"
+                        if error.status_code in {408, 429} or error.status_code >= 500
+                        else "model_request"
+                    )
+                )
+                result.status = "blocked"
+            except ModelAPIError as error:
+                attempt.error_category = (
+                    "model_transport"
+                    if isinstance(
+                        error.__cause__, (OpenAIConnectionError, AnthropicConnectionError)
+                    )
+                    else "model_request"
                 )
                 result.status = "blocked"
             except UsageLimitExceeded:
@@ -375,8 +381,15 @@ class ArtifactGenerator:
                 if attempt.result != "passed":
                     attempt.result = "blocked" if result.status == "blocked" else "failed"
                 result.error_category = attempt.error_category
-                self.persist(run_id, result)
+                await asyncio.to_thread(self.persist, run_id, result)
+            if (
+                result.status == "blocked"
+                and attempt.error_category in {"model_timeout", "model_transport"}
+                and transient_retries < self.settings.llm_call_retries
+            ):
+                transient_retries += 1
+                continue
             if result.status in {"passed", "blocked"}:
                 return result
         result.status, result.error_category = "failed", "validation_exhausted"
-        return self.persist(run_id, result)
+        return await asyncio.to_thread(self.persist, run_id, result)

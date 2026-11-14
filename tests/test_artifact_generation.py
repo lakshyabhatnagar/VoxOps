@@ -15,6 +15,7 @@ from voxops.agents.artifact_agent import INSTRUCTIONS
 from voxops.artifacts.generator import ArtifactGenerator, ModelBudget
 from voxops.domain.artifact_models import ArtifactOutput
 from voxops.storage.artifact_store import ArtifactStore
+from voxops.storage.mongodb import database_for
 from voxops.workflows.stage2_graph import Stage2Graph, merge_results
 
 IGNORES = ".env\n.env.*\n.git/\n*.pem\n*.key\nnode_modules/\n.venv/\n"
@@ -77,7 +78,7 @@ def test_existing_preserved_and_unavailable(tmp_path, artifact_type):
 
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     generator = ArtifactGenerator(settings, store)
     result = asyncio.run(
         generator.generate(
@@ -109,7 +110,7 @@ def test_unfinished_attempt_retains_token_reservation(tmp_path):
 
     root, _, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
     settings = settings_for(tmp_path, artifact_max_tokens=2000, artifact_task_tokens=2000)
-    generator = ArtifactGenerator(settings, ArtifactStore(settings.data_dir), offline_agent())
+    generator = ArtifactGenerator(settings, ArtifactStore(database_for(settings)), offline_agent())
     identifier, task = uuid4().hex, plan.tasks["gitignore"]
     prior = ArtifactAttempt(
         run_id=identifier,
@@ -141,7 +142,7 @@ def test_existing_invalid_artifact_gets_minimal_proposal(tmp_path):
     (root / "Dockerfile").write_text(original)
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     generator = ArtifactGenerator(settings, store, offline_agent())
     task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
     result = asyncio.run(generator.generate(uuid4().hex, root, task, plan, ModelBudget(settings)))
@@ -176,7 +177,7 @@ def test_existing_broken_artifact_can_be_fully_replaced(tmp_path, artifact_type,
     (root / target).write_text(original)
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     agent = Agent(
         TestModel(custom_output_args={"target_path": target, "content": replacement}),
         output_type=ArtifactOutput,
@@ -222,7 +223,7 @@ def test_requested_source_repair_can_change_every_required_line(tmp_path, port_c
     )
     plan = build_plan(root, analysis, plan.strategy_by_unit, patches=[patch])
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     agent = Agent(
         TestModel(custom_output_args={"target_path": "settings.py", "content": replacement}),
         output_type=ArtifactOutput,
@@ -244,7 +245,7 @@ def test_requested_source_repair_can_change_every_required_line(tmp_path, port_c
 def test_run_wide_request_budget(tmp_path):
     root, _, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
     settings = settings_for(tmp_path, artifact_max_requests=1)
-    generator = ArtifactGenerator(settings, ArtifactStore(settings.data_dir), offline_agent())
+    generator = ArtifactGenerator(settings, ArtifactStore(database_for(settings)), offline_agent())
     budget = ModelBudget(settings)
     results = asyncio.run(Stage2Graph(settings, generator, budget).execute(uuid4().hex, root, plan))
     assert budget.requests == 1
@@ -269,7 +270,9 @@ def test_three_attempts_preserve_siblings_and_barrier(tmp_path):
         )
 
     settings = settings_for(tmp_path)
-    generator = ArtifactGenerator(settings, ArtifactStore(settings.data_dir), offline_agent(broken))
+    generator = ArtifactGenerator(
+        settings, ArtifactStore(database_for(settings)), offline_agent(broken)
+    )
     identifier = uuid4().hex
     results = asyncio.run(
         Stage2Graph(settings, generator, ModelBudget(settings)).execute(identifier, root, plan)
@@ -322,7 +325,7 @@ def test_actual_parallel_generation_and_repair_feedback(tmp_path):
 
         settings = settings_for(tmp_path)
         generator = ArtifactGenerator(
-            settings, ArtifactStore(settings.data_dir), offline_agent(controlled)
+            settings, ArtifactStore(database_for(settings)), offline_agent(controlled)
         )
         return await Stage2Graph(settings, generator, ModelBudget(settings)).execute(
             uuid4().hex, root, plan
@@ -349,7 +352,7 @@ def test_unsafe_model_output_is_not_staged(tmp_path, path, content, error):
     model = TestModel(custom_output_args={"target_path": path, "content": content})
     generator = ArtifactGenerator(
         settings,
-        ArtifactStore(settings.data_dir),
+        ArtifactStore(database_for(settings)),
         Agent(model, output_type=ArtifactOutput, retries=0),
     )
     result = asyncio.run(
@@ -358,4 +361,4 @@ def test_unsafe_model_output_is_not_staged(tmp_path, path, content, error):
     assert result.error_category == error
     assert result.proposal is None
     assert "abcdefghijklmno" not in result.model_dump_json()
-    assert not list(settings.data_dir.glob("artifact-blobs/*"))
+    assert generator.store.database.artifact_blobs.count_documents({}) == 0

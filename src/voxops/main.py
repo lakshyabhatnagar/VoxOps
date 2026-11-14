@@ -1,20 +1,28 @@
+import asyncio
 import ipaddress
+from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.mongodb import MongoDBSaver
 from starlette.responses import Response
 
 from voxops.api.artifact_routes import router as artifact_router
 from voxops.api.routes import router
+from voxops.api.workflow_routes import router as workflow_router
 from voxops.artifacts.service import ArtifactService
 from voxops.core.errors import AppError, ErrorDetail, ErrorResponse
 from voxops.core.settings import Settings
+from voxops.repository.acquisition import RepositoryAcquirer
 from voxops.repository.worktree_manager import WorktreeManager
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
+from voxops.workflows.manager import WorkflowManager
 from voxops.workflows.stage1_graph import Stage1Workflow
+from voxops.workflows.stage4_graph import Stage4Workflow
 
 
 # Builds an HTTP response for an application error.
@@ -57,9 +65,31 @@ async def local_only(request: Request, call_next) -> Response:
 # Sets up analysis, generation and worktree storage without contacting the network.
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
-    app = FastAPI(title="VoxOps", version="0.1.0")
+    database = database_for(config)
+
+    # Verify the database when the server starts and close its shared client on shutdown.
+    # Blocking connection work runs on a thread rather than the request event loop.
+    @asynccontextmanager
+    async def lifespan(app):
+        try:
+            await asyncio.to_thread(database.command, "ping")
+            acquirer = await asyncio.to_thread(RepositoryAcquirer, config, database)
+            if acquirer.root not in config.allowed_roots:
+                config.allowed_roots = [*config.allowed_roots, acquirer.root]
+            saver = await asyncio.to_thread(MongoDBSaver, database.client, db_name=database.name)
+            app.state.workflows = WorkflowManager(
+                Stage4Workflow(app.state.artifacts, acquirer, saver)
+            )
+            await app.state.workflows.start()
+            yield
+        finally:
+            if hasattr(app.state, "workflows"):
+                await app.state.workflows.close()
+            await asyncio.to_thread(database.client.close)
+
+    app = FastAPI(title="VoxOps", version="0.1.0", lifespan=lifespan)
     app.state.settings = config
-    app.state.store = ScanStore(config.data_dir)
+    app.state.store = ScanStore(database)
     app.state.workflow = Stage1Workflow(config, app.state.store)
     app.state.worktrees = WorktreeManager(config, app.state.store)
     app.state.artifacts = ArtifactService(config, app.state.store, app.state.worktrees)
@@ -68,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(RequestValidationError, handle_validation_error)
     app.include_router(router)
     app.include_router(artifact_router)
+    app.include_router(workflow_router)
     return app
 
 

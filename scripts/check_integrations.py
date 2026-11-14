@@ -15,6 +15,7 @@ from voxops.domain.artifact_models import RepositoryTarget
 from voxops.github.connection import GitHubConnection
 from voxops.repository.git_executor import GitExecutor
 from voxops.storage.artifact_store import ArtifactStore
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -29,8 +30,8 @@ async def check_model(settings: Settings) -> dict:
         root.mkdir()
         (root / "main.py").write_text("from fastapi import FastAPI\n\napp = FastAPI()\n")
         (root / "requirements.txt").write_text("fastapi>=0.115,<1\nuvicorn>=0.34,<1\n")
-        local = settings.model_copy(update={"allowed_roots": [root], "data_dir": base / "data"})
-        workflow = Stage1Workflow(local, ScanStore(local.data_dir / "scans"))
+        local = settings.model_copy(update={"allowed_roots": [root]})
+        workflow = Stage1Workflow(local, ScanStore(database_for(local)))
         analysis = await workflow.analyze(str(root))
         plan = build_plan(
             root, analysis, {unit.id: "container" for unit in analysis.detected_units}
@@ -38,7 +39,7 @@ async def check_model(settings: Settings) -> dict:
         if plan.unresolved_questions:
             raise AppError("sample_ambiguous", "The sample could not be planned without questions.")
         task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
-        store = ArtifactStore(local.data_dir / "artifacts")
+        store = ArtifactStore(database_for(local))
         result = await ArtifactGenerator(local, store).generate(
             uuid4().hex, root, task, plan, ModelBudget(local)
         )

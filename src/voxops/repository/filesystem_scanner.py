@@ -259,17 +259,15 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
         if not targeted:
             continue
         relevant.append(relative)
-        if name in CONFIG_NAMES and name not in STARTUP_FILES:
-            metadata = file.stat()
-            digest.update(f"{relative}:{metadata.st_size}:{metadata.st_mtime_ns}".encode())
-            continue
         try:
             text = read_bounded(file, settings.max_file_bytes)
             # Secret values must not become persistent, guessable scan/cache fingerprints.
             fingerprint_text = (
                 "\n".join(key.name for key in config_names(text, env_file=True)) if env else text
             )
-            digest.update(relative.encode() + fingerprint_text.encode())
+            digest.update(relative.encode() + b"\0" + fingerprint_text.encode() + b"\0")
+            if name in CONFIG_NAMES and name not in STARTUP_FILES:
+                continue
             if manifest:
                 summary = read_manifest(relative, text)
                 if summary:
@@ -291,7 +289,6 @@ def scan_repository(root: Path, settings: Settings, scan_id: str | None = None) 
     metadata = inspect_git(root)
     if metadata.nested_path:
         warnings.append("Scan path is a subdirectory of a Git repository.")
-    digest.update((metadata.head or "no-head").encode())
     try:
         return RepoScan(
             id=scan_id or uuid4().hex,

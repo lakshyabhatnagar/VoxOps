@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from voxops.artifacts.planner import build_plan
 from voxops.core.errors import AppError
 from voxops.domain.artifact_models import ArtifactPlan, ArtifactTask
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -17,7 +18,7 @@ def fixture_plan(tmp_path, name, strategies):
     root = copy_fixture(tmp_path, name)
     settings = settings_for(tmp_path)
     analysis = asyncio.run(
-        Stage1Workflow(settings, ScanStore(settings.data_dir)).analyze(str(root))
+        Stage1Workflow(settings, ScanStore(database_for(settings))).analyze(str(root))
     )
     choices = {unit.id: strategies[unit.framework.value] for unit in analysis.detected_units}
     return root, analysis, build_plan(root, analysis, choices)
@@ -61,7 +62,7 @@ def test_next_static_export_has_no_container(tmp_path):
     (root / "next.config.js").write_text('module.exports = { output: "export" };\n')
     settings = settings_for(tmp_path)
     analysis = asyncio.run(
-        Stage1Workflow(settings, ScanStore(settings.data_dir)).analyze(str(root))
+        Stage1Workflow(settings, ScanStore(database_for(settings))).analyze(str(root))
     )
     assert analysis.detected_units[0].role.value == "static_frontend"
     plan = build_plan(root, analysis, {analysis.detected_units[0].id: "static"})

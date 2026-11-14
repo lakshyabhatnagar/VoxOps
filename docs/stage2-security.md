@@ -1,5 +1,9 @@
 # Stage 2 security boundaries
 
+Historical Stage 1–3 evidence below describes the original implementation. Stage 4
+replaces operational JSON files and filesystem locks with MongoDB records and a
+single-process execution boundary. See [Stage 4 decisions](stage4-decisions.md).
+
 Run VoxOps as a trusted local service. It is not a public multi-user server or a sandbox. Keep its data directory outside the target repository. Limit `VOXOPS_ALLOWED_ROOTS` to directories the operator trusts.
 
 Artifact paths are canonical repository-relative paths. Reads and writes reject traversal and symlink components. Source inventory is conservative and excludes hidden paths apart from supported exceptions. Review excluded paths before approving a baseline or snapshot. Secret detection is a bounded pattern check, not a guarantee that every secret is found. Text is checked before model input, staging, and publication. Binary assets are allowed only at trusted Git boundaries and are still scanned for recognizable secrets.

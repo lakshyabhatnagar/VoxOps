@@ -15,6 +15,7 @@ from voxops.execution.docker_driver import DockerDriver
 from voxops.execution.environment import SecretSession
 from voxops.execution.planner import build_execution_plan, freeze_plan_contexts
 from voxops.execution.runner import ExecutionRunner
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -114,11 +115,13 @@ async def run_case(case, build_timeout=600):
         fixture(root, case)
         settings = Settings(
             allowed_roots=[base],
-            data_dir=base / "records",
+            mongo_database="voxops_smoke_" + base.name.replace("-", "_"),
             build_timeout_seconds=build_timeout,
             startup_timeout_seconds=45,
         )
-        analysis = await Stage1Workflow(settings, ScanStore(settings.data_dir)).analyze(str(root))
+        analysis = await Stage1Workflow(settings, ScanStore(database_for(settings))).analyze(
+            str(root)
+        )
         assert len(analysis.detected_units) == 1
         unit = analysis.detected_units[0]
         strategy = case.split("-", 1)[1]

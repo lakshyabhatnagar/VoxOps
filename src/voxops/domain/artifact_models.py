@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import Field, field_validator, model_validator
 
@@ -158,7 +159,9 @@ class ArtifactAttempt(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
     task_id: str
-    attempt_number: int = Field(ge=1, le=3)
+    attempt_id: str = Field(default_factory=lambda: uuid4().hex)
+    workflow_id: str | None = None
+    attempt_number: int = Field(ge=1)
     started_at: datetime
     ended_at: datetime | None = None
     model: str
@@ -206,7 +209,7 @@ class TaskResult(Model):
     task_id: str
     status: TaskStatus
     proposal: ArtifactProposal | None = None
-    attempts: list[ArtifactAttempt] = Field(default_factory=list, max_length=3)
+    attempts: list[ArtifactAttempt] = Field(default_factory=list)
     validations: list[ValidationResult] = Field(default_factory=list)
     error_category: str | None = None
 
@@ -332,6 +335,8 @@ class OperationClaim(Model):
 class ArtifactRun(Model):
     schema_version: Literal["1"] = "1"
     run_id: str
+    workflow_attempt_id: str | None = None
+    repair_cycles: dict[str, int] = Field(default_factory=dict)
     repo_fingerprint: str
     scan_id: str
     source_input_fingerprint: str

@@ -1,5 +1,8 @@
 # Stage 3 verification
 
+Historical Stage 3 commands below describe the previous executor. Its CLI scripts
+and execute/publish routes have been removed; use the Stage 4 workflow and tests.
+
 The recovery checks the integrated API, one representative real Docker journey, and a final
 regression/lint pass. Simulated Docker is identified explicitly.
 

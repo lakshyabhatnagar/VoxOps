@@ -1,20 +1,22 @@
 # Set up and test VoxOps integrations
 
-This guide starts with local checks, then tests NVIDIA and GitHub separately. The final section creates a private GitHub repository and pushes approved commits. GitHub Actions may run after a push. The checked-in fixture is for scanning; its `main.py` deliberately raises an error if executed. The live publishing example creates a separate runnable sample.
+This guide starts with local checks, then tests NVIDIA and GitHub separately. The final section uses the Stage 4 workflow with a disposable GitHub source. Approval can push a branch and trigger GitHub Actions. The checked-in Stage 1 fixture is for scanning; its `main.py` deliberately raises an error if executed.
 
 ## Prepare the workspace
 
-Install Python 3.11 or later, `uv`, Git, Node.js, GitHub CLI (`gh`), `curl`, and `jq`. Docker and actionlint are optional. Run all commands from the VoxOps checkout unless a step says otherwise.
+Install Python 3.11 or later, `uv`, Git, Node.js, GitHub CLI (`gh`), `curl`, and `jq`. MongoDB is required. Docker is required for Stage 4 verification. Actionlint is optional. Run all commands from the VoxOps checkout unless a step says otherwise.
 
 ```sh
 cd /home/lakshya/VoxOps
 uv sync --locked
-mkdir -p /tmp/voxops-integration-tests /tmp/voxops-integration-data
-export VOXOPS_DATA_DIR=/tmp/voxops-integration-data
+mkdir -p /tmp/voxops-integration-tests
+docker run -d --name voxops-mongo -p 127.0.0.1:27017:27017 -v voxops-mongo:/data/db mongo:8
+export VOXOPS_MONGO_URI=mongodb://127.0.0.1:27017
+export VOXOPS_MONGO_DATABASE=voxops
 export VOXOPS_ALLOWED_ROOTS='["/tmp/voxops-integration-tests","/home/lakshya/VoxOps/tests/fixtures"]'
 ```
 
-The data directory is outside the test projects. Add any other existing project directory to the JSON array before scanning it. For AEREO, include `/home/lakshya/AEREO` in that array. Do not add a nonexistent root; readiness requires all roots to exist. In `.env`, write the setting once, with a JSON array as its value:
+Operational data lives in MongoDB. Add any other existing project directory to the JSON array before scanning it. For AEREO, include `/home/lakshya/AEREO` in that array. Do not add a nonexistent root; readiness requires all roots to exist. In `.env`, write the setting once, with a JSON array as its value:
 
 ```dotenv
 VOXOPS_ALLOWED_ROOTS='["/home/lakshya/VoxOps","/home/lakshya/AEREO","/tmp/voxops-integration-tests"]'
@@ -37,16 +39,16 @@ node tests/test_api_tester.mjs
 
 Each command should finish successfully. Optional actionlint checks require actionlint and `VOXOPS_ARTIFACT_OPTIONAL_TOOLS=true`. These steps do not build a Docker image.
 
-Run the four offline demonstrations:
+Run the focused offline workflow checks:
 
 ```sh
-uv run python scripts/demo_stage2.py --offline --fixture fastapi_only
-uv run python scripts/demo_stage2.py --offline --bootstrap
-uv run python scripts/demo_stage2.py --offline --fixture vite_only
-uv run python scripts/demo_stage2.py --offline --reject
+.venv/bin/pytest tests/test_workflow_api.py tests/test_stage4_graph.py -q
 ```
 
-These demos use copies, fake model and GitHub adapters, and a local bare Git repository. The demo client supplies approvals for its local test. Expect successful JSON results for the first three and a rejected run for the fourth. Use `--keep /tmp/voxops-integration-tests/NEW-DIRECTORY` to inspect a demo; the named directory must not already exist. No paid model or GitHub service is used.
+These tests use temporary source copies, typed model responses, simulated Docker,
+GitHub metadata fixtures, native graph interrupts, and a real local bare Git remote.
+They do not contact a model or GitHub. The real Docker test is separate and opt-in;
+see [Stage 4 verification](stage4-verification.md).
 
 ## Configure and test NVIDIA
 
@@ -170,69 +172,37 @@ uv run --env-file .env python scripts/check_integrations.py --github --repositor
 
 Replace `OWNER/NAME` with that repository. Use a private repository to exercise Git credentials, since public repositories may allow anonymous reads. The check uses a temporary local Git directory. It reports the lookup and remote SHA without pushing. A null SHA means no `main` branch was found. Investigate errors before publishing. Restart `uv run --env-file .env voxops` in the same terminal so the server receives both GitHub settings and the NVIDIA key.
 
-## Publish a disposable private repository
+## Verify and publish a disposable GitHub source
 
-This exercise makes real GitHub writes. Choose an unused repository name under your own account. VoxOps creates the private repository after you approve its baseline. Use a fresh uninitialized source so the review contains only the two sample files, with no `.env` or existing history.
+Use a small runnable FastAPI, React/Vite, or Next.js repository you own. Do not use
+the scan-only fixture. Start with a private disposable repository and inspect every
+review before authorizing publication.
 
-In the second terminal, run:
+Create a workflow using your source URL and a new client key:
 
 ```sh
-cd /home/lakshya/VoxOps
-mkdir /tmp/voxops-integration-tests/project
-printf 'from fastapi import FastAPI\n\napp = FastAPI()\n' > /tmp/voxops-integration-tests/project/main.py
-printf 'fastapi>=0.115\nuvicorn>=0.34\n' > /tmp/voxops-integration-tests/project/requirements.txt
-OWNER=$(gh api user --jq .login)
-NAME="voxops-integration-$(date +%Y%m%d%H%M%S)"
-printf 'Target: %s/%s\n' "$OWNER" "$NAME"
-curl -fsS http://127.0.0.1:8000/api/v1/repositories/analyze \
+curl -fsS http://127.0.0.1:8000/api/v1/workflows \
   -H 'Content-Type: application/json' \
-  -d '{"path":"/tmp/voxops-integration-tests/project","use_llm":false}' > /tmp/voxops-integration-tests/analysis.json
-jq '{detected_units, unresolved_ambiguities}' /tmp/voxops-integration-tests/analysis.json
-jq '{path:"/tmp/voxops-integration-tests/project", strategies:(.detected_units | map({key:.id,value:"container"}) | from_entries)}' /tmp/voxops-integration-tests/analysis.json > /tmp/voxops-integration-tests/plan-request.json
-curl -fsS http://127.0.0.1:8000/api/v1/artifact-runs/plan \
-  -H 'Content-Type: application/json' --data-binary @/tmp/voxops-integration-tests/plan-request.json | tee /tmp/voxops-integration-tests/plan.json | jq
+  -H "Idempotency-Key: $(date +%s)-disposable-test" \
+  -d '{"repository_url":"https://github.com/OWNER/REPOSITORY","ref":"main"}'
 ```
 
-Inspect the detected unit, tasks, warnings, and `unresolved_questions`. Resolve questions before starting. The container strategy here is for the FastAPI sample. Other units may need `static` or `native` instead.
+Replace `OWNER/REPOSITORY` first. Creation returns HTTP 202 and a `workflow_id`.
+Open the API tester at `http://127.0.0.1:8000/`, enter that workflow ID, and poll its
+status. The tester also supports workflow creation directly.
 
-```sh
-PLAN_ID=$(jq -r '.plan_id' /tmp/voxops-integration-tests/plan.json)
-jq -n --arg plan "$PLAN_ID" --arg owner "$OWNER" --arg name "$NAME" \
-  '{plan_id:$plan,owner:$owner,name:$name,selected_paths:["main.py","requirements.txt"]}' > /tmp/voxops-integration-tests/run-request.json
-curl -fsS http://127.0.0.1:8000/api/v1/artifact-runs \
-  -H 'Content-Type: application/json' --data-binary @/tmp/voxops-integration-tests/run-request.json | tee /tmp/voxops-integration-tests/run.json | jq
-RUN_ID=$(jq -r '.run_id' /tmp/voxops-integration-tests/run.json)
-curl -fsS "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/review" | tee /tmp/voxops-integration-tests/review.json | jq
-```
+If the workflow waits for environment values, load its environment form, enter only
+missing required values, and submit. Values stay in memory. The page acknowledges
+the form through the workflow resume endpoint.
 
-Read the full baseline review, including target, files, omissions, diff, and actions. If it is correct and you authorize repository creation and baseline publication, submit that exact review ID and digest:
+If the workflow waits for approval, load and inspect the current review. Approve or
+reject that exact review. Source approval and final artifact approval are separate
+prompts when both are needed. Final approval requires passed Docker checks.
 
-```sh
-jq '{review_id:.review.review_id,digest:.review.digest,decision:"approve"}' /tmp/voxops-integration-tests/review.json > /tmp/voxops-integration-tests/decision.json
-curl -fsS -X POST "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/approvals" \
-  -H 'Content-Type: application/json' --data-binary @/tmp/voxops-integration-tests/decision.json | jq
-curl -fsS -X POST "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/execute" | jq
-curl -fsS "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID" | jq
-```
+A successful result reports `ready_for_deployment` with matching local and remote
+commit SHAs. It removes temporary containers, worktrees, and the source checkout.
+MongoDB retains evidence. The result does not deploy an application.
 
-Execution can create the private repository and push the approved baseline, then call NVIDIA and validate generated artifacts. If the run is blocked, inspect its errors and task validations before retrying. If another source review is requested, inspect and decide it before continuing. A dirty source snapshot has its own approval; an existing committed source publishes all tracked history for a new repository, not just a selected subset.
-
-Inspect the generated artifact review separately:
-
-```sh
-curl -fsS "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/review" | tee /tmp/voxops-integration-tests/artifact-review.json | jq
-```
-
-Review every file and action, including any CI workflow that may run. If you approve this exact artifact review, run:
-
-```sh
-jq '{review_id:.review.review_id,digest:.review.digest,decision:"approve"}' /tmp/voxops-integration-tests/artifact-review.json > /tmp/voxops-integration-tests/artifact-decision.json
-curl -fsS -X POST "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/approvals" \
-  -H 'Content-Type: application/json' --data-binary @/tmp/voxops-integration-tests/artifact-decision.json | jq
-curl -fsS -X POST "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/publish" | jq
-curl -fsS "http://127.0.0.1:8000/api/v1/artifact-runs/$RUN_ID/result" | jq
-```
-
-The result should report `ready_for_deployment`, the verified remote commit and branch, and `deployment_executed: false`. Publication does not deploy the application. If you reject instead, submit the same review ID and digest with `decision: "reject"`. A rejected run is closed. Create a new plan and run to try again.
-
-There are three distinct review purposes: baseline publication, an optional dirty source snapshot, and generated artifacts. Approval of one does not approve another. Optional source patches require explicit plan inputs and appear in the artifact review. Inspect the owned worktree before cleanup. Stage 2 does not automatically delete reviewed or published worktrees; use the worktree endpoint and explicitly choose `?discard_changes=true` when required. See [Stage 2 usage](stage2-usage.md) for recovery and patch details.
+To stop the attempt, use the workflow cancel button. For another attempt, create a
+new workflow with a new client key. See the [workflow API examples](../README.md)
+for polling, environment submission, and exact review resume requests.

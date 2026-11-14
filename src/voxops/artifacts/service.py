@@ -1,6 +1,6 @@
 import asyncio
-import json
 import os
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -21,7 +21,7 @@ from voxops.domain.artifact_models import (
     Strategy,
 )
 from voxops.domain.execution_models import EnvFormSchema, ExecutionAttestation, ExecutionRun
-from voxops.domain.models import AIUsage
+from voxops.domain.models import AIUsage, AnalysisResult
 from voxops.execution.candidate import attestation_digest, candidate_identity
 from voxops.execution.contexts import remove_context
 from voxops.execution.docker_driver import DockerDriver
@@ -158,7 +158,7 @@ class ArtifactService:
             generator.store
             if generator
             else ArtifactStore(
-                settings.data_dir, settings.max_file_bytes, settings.artifact_staged_bytes
+                scans.database, settings.max_file_bytes, settings.artifact_staged_bytes
             )
         )
         self.generator = generator or ArtifactGenerator(settings, self.store)
@@ -341,30 +341,41 @@ class ArtifactService:
         strategies: dict[str, Strategy],
         provider: str | None = None,
         patches: list[SourcePatchSpec] | None = None,
+        *,
+        analysis: AnalysisResult | None = None,
     ) -> ArtifactPlan:
         source = workspace_path(value, self.settings.allowed_roots)
-        if self.store.directory.is_relative_to(source):
-            raise AppError(
-                "unsafe_storage", "Set VOXOPS_DATA_DIR outside the target repository.", 409
-            )
         with self.store.project_lock(fingerprint(source)):
-            before, _ = capture_source(source, self.settings.max_file_bytes)
-            analysis = await self.analysis.analyze(str(source))
+            before, _ = await asyncio.to_thread(
+                capture_source, source, self.settings.max_file_bytes
+            )
+            analysis = analysis or await self.analysis.analyze(str(source))
+            if analysis.scan.repo_fingerprint != fingerprint(source):
+                raise AppError("source_changed", "Analysis belongs to a different workspace.", 409)
             plan = build_plan(
-                source, analysis, strategies, provider, patches,
+                source,
+                analysis,
+                strategies,
+                provider,
+                patches,
                 max_file_bytes=self.settings.max_file_bytes,
             )
-            if capture_source(source, self.settings.max_file_bytes)[0] != before:
+            if (await asyncio.to_thread(capture_source, source, self.settings.max_file_bytes))[
+                0
+            ] != before:
                 raise AppError("source_changed", "Source changed during analysis; plan again.", 409)
-            self.store.records.write(
-                f"artifact-plan-{plan.plan_id}.json",
-                {
-                    "schema_version": "1",
-                    "plan": plan.model_dump(mode="json"),
-                    "source": str(source),
-                    "source_fingerprint": before,
-                    "head": analysis.scan.git.head,
-                },
+            (
+                await asyncio.to_thread(
+                    self.store.save_plan,
+                    plan.plan_id,
+                    {
+                        "schema_version": "1",
+                        "plan": plan.model_dump(mode="json"),
+                        "source": str(source),
+                        "source_fingerprint": before,
+                        "head": analysis.scan.git.head,
+                    },
+                )
             )
             return plan
 
@@ -375,11 +386,10 @@ class ArtifactService:
     async def start(
         self, plan_id: str, owner: str, name: str, selected_paths: list[str] | None = None
     ) -> ArtifactRun:
-        path = self.store.directory / f"artifact-plan-{self.store.identifier(plan_id)}.json"
+        saved = await asyncio.to_thread(self.store.load_plan, plan_id)
         try:
-            saved = json.loads(path.read_text())
             plan = ArtifactPlan.model_validate(saved["plan"])
-        except (OSError, ValueError, KeyError):
+        except (ValueError, KeyError):
             raise AppError("plan_not_found", "Stored artifact plan is unavailable.", 404) from None
         source = workspace_path(saved["source"], self.settings.allowed_roots)
         with self.store.project_lock(plan.repo_fingerprint):
@@ -387,9 +397,9 @@ class ArtifactService:
                 raise AppError(
                     "ambiguous_plan", "Resolve the plan's questions before generation.", 409
                 )
-            if capture_source(source, self.settings.max_file_bytes)[0] != saved[
-                "source_fingerprint"
-            ] or (inspect_git(source).head != saved["head"]):
+            if (await asyncio.to_thread(capture_source, source, self.settings.max_file_bytes))[
+                0
+            ] != saved["source_fingerprint"] or (inspect_git(source).head != saved["head"]):
                 raise AppError("source_changed", "Source changed after planning; plan again.", 409)
             identifier = uuid4().hex
             run = ArtifactRun(
@@ -403,13 +413,13 @@ class ArtifactService:
                 target=RepositoryTarget(owner=owner, name=name),
                 branch=f"voxops/{identifier}",
             )
-            self.store.bind_source(identifier, source)
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.bind_source, identifier, source)
+            await asyncio.to_thread(self.store.save_run, run)
             try:
                 await self.publisher.preflight(run, selected_paths)
             except AppError as error:
                 run.status, run.errors = "blocked", [error.category]
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
             return run
 
     # Record which original source paths the user wants included in the run.
@@ -417,9 +427,9 @@ class ArtifactService:
     # Create the appropriate source review using the existing publisher rather than committing
     # unreviewed edits.
     async def select_source(self, run_id: str, paths: list[str]) -> ArtifactRun:
-        previous = self.store.load_run(run_id)
+        previous = await asyncio.to_thread(self.store.load_run, run_id)
         with self.store.project_lock(previous.repo_fingerprint):
-            run = self.store.load_run(run_id)
+            run = await asyncio.to_thread(self.store.load_run, run_id)
             self._idle(run)
             if run.status in {"rejected", "cancelled", "ready_for_deployment"}:
                 raise AppError("run_closed", "This run is closed; create a new plan and run.", 409)
@@ -428,10 +438,15 @@ class ArtifactService:
                     "selection_closed", "Source selection has already been prepared.", 409
                 )
             if run.progress.baseline_pushed:
-                self.publisher.snapshot_review(run, self.publisher.source(run), paths)
+                await asyncio.to_thread(
+                    self.publisher.snapshot_review,
+                    run,
+                    await asyncio.to_thread(self.publisher.source, run),
+                    paths,
+                )
             else:
                 await self.publisher.preflight(run, paths)
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
             return run
 
     # Count requests and tokens across every task's saved model attempts.
@@ -456,12 +471,10 @@ class ArtifactService:
             output_tokens=sum(attempt.usage.output_tokens for attempt in attempts),
         )
 
-    # Continue a run through generation, environment setup, and local verification.
-    # Use a separate worktree, claim ownership, and reuse existing generated files and attempt
-    # records.
-    # Return when input or approval is needed, or when verification has produced the final review.
-    async def execute(self, run_id: str) -> ArtifactRun:
-        previous = self.store.load_run(run_id)
+    # Generate and validate the candidate, then prepare its environment and execution plan.
+    # Keep Docker verification separate so the supervisor can checkpoint before running it.
+    async def generate_candidate(self, run_id: str) -> ArtifactRun:
+        previous = await asyncio.to_thread(self.store.load_run, run_id)
         if (previous.operation and not self._owner_alive(previous.operation.owner_process)) or (
             not previous.operation
             and previous.execution
@@ -469,7 +482,7 @@ class ArtifactService:
         ):
             await self._recover(previous)
         with self.store.project_lock(previous.repo_fingerprint):
-            run = self.store.load_run(run_id)
+            run = await asyncio.to_thread(self.store.load_run, run_id)
             self._idle(run)
             if (
                 run.status in {"awaiting_review", "approved"}
@@ -489,9 +502,11 @@ class ArtifactService:
             )
             cancel = asyncio.Event()
             self._controls[run_id] = (epoch, cancel)
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
         try:
-            destination = Path(self.worktrees.inspect(run.worktree_id).location)
+            destination = Path(
+                (await asyncio.to_thread(self.worktrees.inspect, run.worktree_id)).location
+            )
             if run.execution is None:
                 future = {task.target_path for task in run.plan.tasks.values()}
                 for task in run.plan.tasks.values():
@@ -517,12 +532,12 @@ class ArtifactService:
                 )
                 generated = await graph.execute(run.run_id, destination, run.plan, run.tasks)
                 with self.store.project_lock(run.repo_fingerprint):
-                    run = self._claimed(run_id, epoch)
+                    run = await asyncio.to_thread(self._claimed, run_id, epoch)
                     if cancel.is_set():
                         raise AppError("CANCELLED", "Execution was cancelled.", 409)
                     run.tasks = generated
-                    self.store.save_run(run)
-                self._record_model_usage(run)
+                    await asyncio.to_thread(self.store.save_run, run)
+                await asyncio.to_thread(self._record_model_usage, run)
                 if any(
                     task.status not in {"passed", "validated_existing", "skipped"}
                     for task in run.tasks.values()
@@ -530,8 +545,8 @@ class ArtifactService:
                     raise AppError("artifacts_incomplete", "Artifacts are incomplete.", 409)
                 run.status = "validating"
                 contents = {
-                    result.proposal.target_path: self.store.read_blob(
-                        result.proposal.staged_ref
+                    result.proposal.target_path: (
+                        await asyncio.to_thread(self.store.read_blob, result.proposal.staged_ref)
                     ).decode()
                     for result in run.tasks.values()
                     if result.proposal
@@ -540,13 +555,17 @@ class ArtifactService:
                 if not self.generator.valid(findings):
                     raise AppError("cross_artifact_validation_failed", "Artifacts conflict.", 409)
                 with self.store.project_lock(run.repo_fingerprint):
-                    current = self._claimed(run_id, epoch)
+                    current = await asyncio.to_thread(self._claimed, run_id, epoch)
                     current.tasks, current.model_usage = run.tasks, run.model_usage
                     current.status = "validating"
-                    self.publisher.source(current)
-                    apply_proposals(destination, current, self.store)
-                    plan = build_execution_plan(destination, current.plan, self.settings)
-                    _, inventory = capture_source(destination, self.settings.max_file_bytes)
+                    await asyncio.to_thread(self.publisher.source, current)
+                    await asyncio.to_thread(apply_proposals, destination, current, self.store)
+                    plan = await asyncio.to_thread(
+                        build_execution_plan, destination, current.plan, self.settings
+                    )
+                    _, inventory = await asyncio.to_thread(
+                        capture_source, destination, self.settings.max_file_bytes
+                    )
                     execution_id = uuid4().hex
                     schema = EnvFormSchema(source_digest=digest({}))
                     identity = candidate_identity(
@@ -560,7 +579,14 @@ class ArtifactService:
                         env_schema=schema,
                         identity=identity,
                     )
-                    self.environment.prepare(current, destination, self.publisher.source(current))
+                    (
+                        await asyncio.to_thread(
+                            self.environment.prepare,
+                            current,
+                            destination,
+                            await asyncio.to_thread(self.publisher.source, current),
+                        )
+                    )
                     current.execution.identity = candidate_identity(
                         current,
                         inventory,
@@ -569,32 +595,32 @@ class ArtifactService:
                         self.settings,
                         execution_id,
                     )
-                    self.store.save_run(current)
-            return await self._verify(run_id, epoch, destination, cancel)
+                    await asyncio.to_thread(self.store.save_run, current)
+            return await asyncio.to_thread(self.store.load_run, run_id)
         except AppError as error:
             with self.store.project_lock(previous.repo_fingerprint):
-                run = self._claimed(run_id, epoch)
+                run = await asyncio.to_thread(self._claimed, run_id, epoch)
                 run.status, run.errors = "blocked", [error.category]
                 if run.execution:
                     run.execution.status = (
                         "cancelled" if error.category == "CANCELLED" else "blocked"
                     )
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
                 run.operation = None
                 return run
         except asyncio.CancelledError:
             cancel.set()
             with self.store.project_lock(previous.repo_fingerprint):
-                run = self._claimed(run_id, epoch)
+                run = await asyncio.to_thread(self._claimed, run_id, epoch)
                 if run.execution:
                     run.execution.status = "cancelled"
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
             raise
         finally:
             with self.store.project_lock(previous.repo_fingerprint):
-                run = self._claimed(run_id, epoch)
+                run = await asyncio.to_thread(self._claimed, run_id, epoch)
                 run.operation = None
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
             self._controls.pop(run_id, None)
 
     # Take over a run only after its former owner is no longer active.
@@ -603,7 +629,7 @@ class ArtifactService:
     # Release the recovery claim afterward, and report cleanup that could not be completed.
     async def _recover(self, previous):
         with self.store.project_lock(previous.repo_fingerprint):
-            run = self.store.load_run(previous.run_id)
+            run = await asyncio.to_thread(self.store.load_run, previous.run_id)
             if run.operation and self._owner_alive(run.operation.owner_process):
                 raise AppError("verification_busy", "Another operation owns this run.", 409)
             epoch = uuid4().hex
@@ -611,19 +637,19 @@ class ArtifactService:
                 epoch=epoch, owner_process=self._process_identity(), kind="execute"
             )
             resources = list(run.execution.resources) if run.execution else []
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
 
         # Save a resource's latest cleanup state while recovery owns the run.
         # Replace the record with the same resource name instead of appending duplicate versions.
         # This lets another recovery attempt see which resources still need removal.
-        def journal(item):
+        async def journal(item):
             with self.store.project_lock(run.repo_fingerprint):
-                current = self._claimed(run.run_id, epoch)
+                current = await asyncio.to_thread(self._claimed, run.run_id, epoch)
                 current.execution.resources = [
                     r for r in current.execution.resources if r.name != item.name
                 ]
                 current.execution.resources.append(item.model_copy(deep=True))
-                self.store.save_run(current)
+                await asyncio.to_thread(self.store.save_run, current)
 
         try:
             for owner in {item.ownership_token for item in resources if item.state != "removed"}:
@@ -633,267 +659,328 @@ class ArtifactService:
                 driver.resources = [item for item in resources if item.ownership_token == owner]
                 await driver.cleanup()
             with self.store.project_lock(run.repo_fingerprint):
-                current = self._claimed(run.run_id, epoch)
+                current = await asyncio.to_thread(self._claimed, run.run_id, epoch)
                 if current.execution:
                     for entries in current.execution.attempts.values():
                         for attempt in entries:
                             if attempt.status == "running":
                                 attempt.status, attempt.ended_at = "interrupted", datetime.now(UTC)
                     current.execution.status = "interrupted"
-                    self.store.save_run(current)
+                    await asyncio.to_thread(self.store.save_run, current)
                     if any(item.state != "removed" for item in current.execution.resources):
                         raise AppError(
                             "RESOURCE_LIMIT", "Owned resource cleanup remains pending.", 409
                         )
         finally:
             with self.store.project_lock(run.repo_fingerprint):
-                current = self._claimed(run.run_id, epoch)
+                current = await asyncio.to_thread(self._claimed, run.run_id, epoch)
                 current.operation = None
+                await asyncio.to_thread(self.store.save_run, current)
+
+    # Claim one mutation step and release its ownership after the step returns or fails.
+    # Each graph node starts a fresh operation while the same workflow retains its saved results.
+    @asynccontextmanager
+    async def operation(self, run_id: str):
+        previous = await asyncio.to_thread(self.store.load_run, run_id)
+        if previous.operation and not self._owner_alive(previous.operation.owner_process):
+            await self._recover(previous)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run = await asyncio.to_thread(self.store.load_run, run_id)
+            self._idle(run)
+            epoch = uuid4().hex
+            run.operation = OperationClaim(
+                epoch=epoch, owner_process=self._process_identity(), kind="execute"
+            )
+            cancel = asyncio.Event()
+            self._controls[run_id] = (epoch, cancel)
+            await asyncio.to_thread(self.store.save_run, run)
+        try:
+            yield run, epoch, cancel
+        finally:
+            with self.store.project_lock(previous.repo_fingerprint):
+                current = await asyncio.to_thread(self._claimed, run_id, epoch)
+                current.operation = None
+                await asyncio.to_thread(self.store.save_run, current)
+            self._controls.pop(run_id, None)
+
+    # Run one verification pass using the existing runner's dependency scheduler and cache checks.
+    # Repairs happen in a separate step so LangGraph can checkpoint and enforce per-unit limits.
+    async def verify_candidate(self, run_id: str):
+        async with self.operation(run_id) as (run, epoch, cancel):
+            destination = Path(
+                (await asyncio.to_thread(self.worktrees.inspect, run.worktree_id)).location
+            )
+            return await self._verify_once(run_id, epoch, destination, cancel)
+
+    # Preserve the runner's resource journal, input authority checks and coherent evidence writes.
+    # This pass never generates files or starts another repair automatically.
+    async def _verify_once(self, run_id, epoch, destination, cancel):
+        initial = await asyncio.to_thread(self.store.load_run, run_id)
+        project = initial.repo_fingerprint
+        with self.store.project_lock(project):
+            run = await asyncio.to_thread(self._claimed, run_id, epoch)
+            source = await asyncio.to_thread(self.publisher.source, run)
+            await asyncio.to_thread(self.environment.form, run, source, destination)
+            try:
+                session = await asyncio.to_thread(
+                    self.environment.authority, run, source, destination
+                )
+            except AppError as error:
+                if error.category == "env_unresolved":
+                    run.execution.status = "waiting_for_env"
+                    await asyncio.to_thread(self.store.save_run, run)
+                    run.operation = None
+                    return run
+                raise
+            execution = run.execution
+            execution.status = "verifying"
+            execution.epoch = epoch
+            execution.owner_process = self._process_identity()
+            execution.config_generations = dict(session.unit_generations)
+            _, inventory = await asyncio.to_thread(
+                capture_source, destination, self.settings.max_file_bytes
+            )
+            expected_tree = digest(inventory)
+            previous = None
+            if execution.units:
+                previous = ExecutionOutcome(
+                    execution.previous_plan or execution.plan,
+                    dict(execution.units),
+                    tuple(a for entries in execution.attempts.values() for a in entries),
+                )
+            plan = execution.plan.model_copy(deep=True)
+            await asyncio.to_thread(self.store.save_run, run)
+
+        # Reload the run under the project lock before saving an execution callback.
+        # Require the same source tree, configuration markers, and operation owner.
+        # Reject a stale callback rather than letting old Docker work certify changed inputs.
+        def commit_update(mutator, expected_tree=expected_tree, session=session):
+            with self.store.project_lock(project):
+                current = self._claimed(run_id, epoch)
+                _, actual = capture_source(destination, self.settings.max_file_bytes)
+                if (
+                    digest(actual) != expected_tree
+                    or session.unit_generations != current.execution.config_generations
+                ):
+                    raise AppError("verification_stale", "Execution inputs changed.", 409)
+                mutator(current.execution)
                 self.store.save_run(current)
 
-    # Run the existing execution plan and save progress through callbacks.
-    # If a supported failure permits repair, reuse the same Stage 2 task and bounded attempt
-    # history.
-    # Stop with missing configuration, failure, or a new final review whose report matches the
-    # checked candidate.
-    async def _verify(self, run_id, epoch, destination, cancel):
-        initial = self.store.load_run(run_id)
-        project = initial.repo_fingerprint
-        retry_failed = True
-        while True:
-            with self.store.project_lock(project):
-                run = self._claimed(run_id, epoch)
-                source = self.publisher.source(run)
-                self.environment.form(run, source, destination)
-                try:
-                    session = self.environment.authority(run, source, destination)
-                except AppError as error:
-                    if error.category == "env_unresolved":
-                        run.execution.status = "waiting_for_env"
-                        self.store.save_run(run)
-                        run.operation = None
-                        return run
-                    raise
-                execution = run.execution
-                execution.status = "verifying"
-                execution.epoch = epoch
-                execution.owner_process = self._process_identity()
-                execution.config_generations = dict(session.unit_generations)
-                _, inventory = capture_source(destination, self.settings.max_file_bytes)
-                expected_tree = digest(inventory)
-                previous = None
-                if execution.units:
-                    previous = ExecutionOutcome(
-                        execution.previous_plan or execution.plan,
-                        dict(execution.units),
-                        tuple(a for entries in execution.attempts.values() for a in entries),
-                    )
-                plan = execution.plan.model_copy(deep=True)
-                self.store.save_run(run)
+        writer = asyncio.Lock()
 
-            # Reload the run under the project lock before saving an execution callback.
-            # Require the same source tree, configuration markers, and operation owner.
-            # Reject a stale callback rather than letting old Docker work certify changed inputs.
-            def update(mutator, expected_tree=expected_tree, session=session):
-                with self.store.project_lock(project):
-                    current = self._claimed(run_id, epoch)
-                    _, actual = capture_source(destination, self.settings.max_file_bytes)
-                    if (
-                        digest(actual) != expected_tree
-                        or session.unit_generations != current.execution.config_generations
-                    ):
-                        raise AppError("verification_stale", "Execution inputs changed.", 409)
-                    mutator(current.execution)
-                    self.store.save_run(current)
+        # Serialize callback writes before moving their MongoDB and source checks to a thread.
+        # Parallel units cannot replace a run document using competing stale copies.
+        async def update(mutator):
+            async with writer:
+                await asyncio.to_thread(commit_update, mutator)
 
-            # Forward a Docker resource update through the checked run-update path.
-            # Use the resource's generated name to find its existing record.
-            # The saved run then tracks cleanup progress without the driver writing storage
-            # directly.
-            def journal(item):
-                # Replace any older resource record with the same name.
-                # Store a copy of the new state in the execution's resource list.
-                # This preserves one current record for recovery and final cleanup checks.
-                def record(state):
-                    state.resources = [r for r in state.resources if r.name != item.name]
-                    state.resources.append(item.model_copy(deep=True))
+        # Forward a Docker resource update through the checked run-update path.
+        # Use the resource's generated name to find its existing record.
+        # The saved run then tracks cleanup progress without the driver writing storage
+        # directly.
+        async def journal(item):
+            # Replace any older resource record with the same name.
+            # Store a copy of the new state in the execution's resource list.
+            # This preserves one current record for recovery and final cleanup checks.
+            def record(state):
+                state.resources = [r for r in state.resources if r.name != item.name]
+                state.resources.append(item.model_copy(deep=True))
 
-                update(record)
+            await update(record)
 
-            # Save concrete execution settings discovered while preparing an app.
-            # For example, the runner may now know the exact builder image ID and tool versions.
-            # Update the app's job input codes so attempts refer to those finalized inputs.
-            def prepared(item):
-                # Replace this app's saved execution specification with the prepared version.
-                # Apply its final input comparison code to all of its planned jobs.
-                # The saved plan and subsequent attempt records now describe the same tools and
-                # configuration.
-                def record(state):
-                    state.plan.units[item.spec.unit_id] = item.spec
-                    for task in state.plan.tasks.values():
-                        if task.unit_id == item.spec.unit_id:
-                            task.input_digest = item.task_input_digest
+        # Save concrete execution settings discovered while preparing an app.
+        # For example, the runner may now know the exact builder image ID and tool versions.
+        # Update the app's job input codes so attempts refer to those finalized inputs.
+        async def prepared(item):
+            # Replace this app's saved execution specification with the prepared version.
+            # Apply its final input comparison code to all of its planned jobs.
+            # The saved plan and subsequent attempt records now describe the same tools and
+            # configuration.
+            def record(state):
+                state.plan.units[item.spec.unit_id] = item.spec
+                for task in state.plan.tasks.values():
+                    if task.unit_id == item.spec.unit_id:
+                        task.input_digest = item.task_input_digest
 
-                update(record)
+            await update(record)
 
-            # Send a running or completed attempt to the checked update path.
-            # Locate the history list for the attempt's task.
-            # Replacing by attempt ID lets progress updates complete an existing attempt without
-            # counting it twice.
-            def attempt(item):
-                # Remove the older saved version of this attempt, if present.
-                # Append the newest version to its task's history.
-                # This records status changes while keeping distinct retries as separate attempts.
-                def record(state):
-                    entries = state.attempts.setdefault(item.task_id, [])
-                    entries[:] = [a for a in entries if a.attempt_id != item.attempt_id]
-                    entries.append(item)
+        # Send a running or completed attempt to the checked update path.
+        # Locate the history list for the attempt's task.
+        # Replacing by attempt ID lets progress updates complete an existing attempt without
+        # counting it twice.
+        async def attempt(item):
+            # Remove the older saved version of this attempt, if present.
+            # Append the newest version to its task's history.
+            # This records status changes while keeping distinct retries as separate attempts.
+            def record(state):
+                entries = state.attempts.setdefault(item.task_id, [])
+                entries[:] = [a for a in entries if a.attempt_id != item.attempt_id]
+                entries.append(item)
 
-                update(record)
+            await update(record)
 
-            # Save one app's completed verification result through the checked callback path.
-            # Use the app ID as its key in the execution record.
-            # Later review and repair decisions can inspect its checks and diagnostics.
-            def unit(item):
-                update(lambda state: state.units.__setitem__(item.unit_id, item))
+        # Save one app's completed verification result through the checked callback path.
+        # Use the app ID as its key in the execution record.
+        # Later review and repair decisions can inspect its checks and diagnostics.
+        async def unit(item):
+            await update(lambda state: state.units.__setitem__(item.unit_id, item))
 
-            # Create the Docker driver for one app with this run's journal, cancellation, and
-            # redaction hooks.
-            # Use the supplied driver factory when a test or demo replaces the Docker boundary.
-            # Otherwise create the real driver that operates the local Docker daemon.
-            def driver(unit_id, session=session, execution_id=execution.execution_id):
-                if self.driver_factory:
-                    return self.driver_factory(unit_id, journal, cancel, session)
-                return DockerDriver(
-                    self.settings, run_id, execution_id, journal, cancel, session.redact
+        # Create the Docker driver for one app with this run's journal, cancellation, and
+        # redaction hooks.
+        # Use the supplied driver factory when a test or demo replaces the Docker boundary.
+        # Otherwise create the real driver that operates the local Docker daemon.
+        def driver(unit_id, session=session, execution_id=execution.execution_id):
+            if self.driver_factory:
+                return self.driver_factory(unit_id, journal, cancel, session)
+            return DockerDriver(
+                self.settings, run_id, execution_id, journal, cancel, session.redact
+            )
+
+        contexts = await asyncio.to_thread(freeze_plan_contexts, destination, plan, self.settings)
+        try:
+            outcome = await ExecutionRunner(self.settings, driver).run(
+                plan,
+                contexts,
+                session,
+                config_generations=execution.config_generations,
+                previous=previous,
+                retry_failed=True,
+                on_prepared=prepared,
+                on_attempt=attempt,
+                on_unit=unit,
+            )
+        finally:
+            for context in contexts.values():
+                await asyncio.to_thread(remove_context, context)
+        if cancel.is_set():
+            raise AppError("CANCELLED", "Execution was cancelled.", 409)
+        with self.store.project_lock(project):
+            run = await asyncio.to_thread(self._claimed, run_id, epoch)
+            execution = run.execution
+            execution.plan = outcome.plan
+            execution.previous_plan = outcome.plan.model_copy(deep=True)
+            execution.units = dict(outcome.units)
+            execution.attempts = {}
+            for item in outcome.attempts:
+                execution.attempts.setdefault(item.task_id, []).append(item)
+            _, inventory = await asyncio.to_thread(
+                capture_source, destination, self.settings.max_file_bytes
+            )
+            if digest(inventory) != expected_tree:
+                raise AppError("verification_stale", "Execution candidate changed.", 409)
+            execution.identity = candidate_identity(
+                run,
+                inventory,
+                execution.plan,
+                execution.env_schema,
+                self.settings,
+                execution.execution_id,
+            )
+            statuses = {item.status for item in outcome.units.values()}
+            if statuses <= {"passed", "verification_incomplete"}:
+                status = (
+                    "verification_incomplete" if "verification_incomplete" in statuses else "passed"
                 )
-
-            contexts = freeze_plan_contexts(destination, plan, self.settings)
-            try:
-                outcome = await ExecutionRunner(self.settings, driver).run(
-                    plan,
-                    contexts,
-                    session,
-                    config_generations=execution.config_generations,
-                    previous=previous,
-                    retry_failed=retry_failed,
-                    on_prepared=prepared,
-                    on_attempt=attempt,
-                    on_unit=unit,
+                execution.status = status
+                run.warnings.extend(f"Resolved earlier error: {error}" for error in run.errors)
+                run.errors = []
+                attestation = ExecutionAttestation(
+                    identity=execution.identity, status=status, units=outcome.units
                 )
-            finally:
-                for context in contexts.values():
-                    remove_context(context)
-            retry_failed = False
-            if cancel.is_set():
-                raise AppError("CANCELLED", "Execution was cancelled.", 409)
-            with self.store.project_lock(project):
-                run = self._claimed(run_id, epoch)
-                execution = run.execution
-                execution.plan = outcome.plan
-                execution.previous_plan = outcome.plan.model_copy(deep=True)
-                execution.units = dict(outcome.units)
-                execution.attempts = {}
-                for item in outcome.attempts:
-                    execution.attempts.setdefault(item.task_id, []).append(item)
-                _, inventory = capture_source(destination, self.settings.max_file_bytes)
-                if digest(inventory) != expected_tree:
-                    raise AppError("verification_stale", "Execution candidate changed.", 409)
-                execution.identity = candidate_identity(
-                    run,
-                    inventory,
-                    execution.plan,
-                    execution.env_schema,
-                    self.settings,
-                    execution.execution_id,
-                )
-                statuses = {item.status for item in outcome.units.values()}
-                if statuses <= {"passed", "verification_incomplete"}:
-                    status = (
-                        "verification_incomplete"
-                        if "verification_incomplete" in statuses
-                        else "passed"
-                    )
-                    execution.status = status
-                    run.warnings.extend(f"Resolved earlier error: {error}" for error in run.errors)
-                    run.errors = []
-                    attestation = ExecutionAttestation(
-                        identity=execution.identity, status=status, units=outcome.units
-                    )
-                    attestation.digest = attestation_digest(attestation)
-                    execution.attestation = attestation
-                    review = self.publisher.artifact_review(run)
-                    review.digest = review_digest(review)
-                    self.store.save_run(run)
-                    run.operation = None
-                    return run
-                execution.status = "blocked" if "blocked" in statuses else "failed"
-                self.store.save_run(run)
-            diagnostics = [
-                diagnostic for result in outcome.units.values() for diagnostic in result.diagnostics
-            ]
-            prior = [
-                attempt
-                for task in run.plan.tasks.values()
-                for attempt in self.generator.previous(run_id, task).attempts
-            ]
-            budget = ModelBudget(self.settings, prior)
-            proposal = None
-            for diagnostic in diagnostics:
-                proposal = await propose_repair(
-                    run, destination, outcome.plan, diagnostic, self.generator, budget
-                )
-                if proposal is not None:
-                    break
-            if proposal is None:
+                attestation.digest = attestation_digest(attestation)
+                execution.attestation = attestation
+                review = await asyncio.to_thread(self.publisher.artifact_review, run)
+                review.digest = review_digest(review)
+                await asyncio.to_thread(self.store.save_run, run)
                 run.operation = None
                 return run
-            with self.store.project_lock(project):
-                run = self._claimed(run_id, epoch)
-                self._record_model_usage(run)
-                if proposal.status != "passed" or proposal.proposal is None:
-                    self.store.save_run(run)
-                    run.operation = None
-                    return run
-                old_hash = run.applied_hashes[proposal.task_id]
-                if proposal.proposal.content_hash == old_hash:
-                    run.tasks[proposal.task_id] = proposal
-                    self.store.save_run(run)
-                    run.operation = None
-                    return run
+            execution.status = "blocked" if "blocked" in statuses else "failed"
+            await asyncio.to_thread(self.store.save_run, run)
+        return run
+
+    # Apply at most one authorized repair for a selected failed unit.
+    # The workflow decides whether another verification pass is allowed afterward.
+    async def repair_candidate(self, run_id: str, unit_id: str):
+        async with self.operation(run_id) as (run, epoch, cancel):
+            if run.repair_cycles.get(unit_id, 0) >= self.settings.max_repair_cycles:
+                return run
+            run.repair_cycles[unit_id] = run.repair_cycles.get(unit_id, 0) + 1
+            await asyncio.to_thread(self.store.save_run, run)
+            destination = Path(
+                (await asyncio.to_thread(self.worktrees.inspect, run.worktree_id)).location
+            )
+            return await self._repair_once(run_id, epoch, destination, unit_id)
+
+    # Feed this unit's mapped diagnostics back through the existing Stage 2 repair mechanism.
+    # Rebuild input identities after applying a checked proposal without touching unrelated tasks.
+    async def _repair_once(self, run_id, epoch, destination, unit_id):
+        run = await asyncio.to_thread(self._claimed, run_id, epoch)
+        project = run.repo_fingerprint
+        diagnostics = [
+            diagnostic
+            for result in run.execution.units.values()
+            if result.unit_id == unit_id
+            for diagnostic in result.diagnostics
+        ]
+        prior = [
+            attempt
+            for task in run.plan.tasks.values()
+            for attempt in self.generator.previous(run_id, task).attempts
+        ]
+        budget = ModelBudget(self.settings, prior)
+        proposal = None
+        for diagnostic in diagnostics:
+            proposal = await propose_repair(
+                run, destination, run.execution.plan, diagnostic, self.generator, budget
+            )
+            if proposal is not None:
+                break
+        if proposal is None:
+            run.operation = None
+            return run
+        with self.store.project_lock(project):
+            run = await asyncio.to_thread(self._claimed, run_id, epoch)
+            await asyncio.to_thread(self._record_model_usage, run)
+            if proposal.status != "passed" or proposal.proposal is None:
+                await asyncio.to_thread(self.store.save_run, run)
+                run.operation = None
+                return run
+            old_hash = run.applied_hashes[proposal.task_id]
+            if proposal.proposal.content_hash == old_hash:
                 run.tasks[proposal.task_id] = proposal
-                contents = {
-                    r.proposal.target_path: self.store.read_blob(r.proposal.staged_ref).decode()
-                    for r in run.tasks.values()
-                    if r.proposal
-                }
-                if not self.generator.valid(
-                    validate_cross_artifacts(run.plan, contents, root=destination)
-                ):
-                    raise AppError(
-                        "cross_artifact_validation_failed", "Repaired artifacts conflict.", 409
-                    )
-                apply_proposals(destination, run, self.store)
-                execution = run.execution
-                execution.attestation = None
-                execution.previous_plan = outcome.plan.model_copy(deep=True)
-                execution.plan = build_execution_plan(destination, run.plan, self.settings)
-                _, inventory = capture_source(destination, self.settings.max_file_bytes)
-                if (
-                    self.environment.source_digest(run, destination)
-                    != execution.env_schema.source_digest
-                ):
-                    self.environment.clear(run_id)
-                    execution.env_schema = EnvFormSchema(source_digest=digest({}))
-                    execution.identity = candidate_identity(
-                        run,
-                        inventory,
-                        execution.plan,
-                        execution.env_schema,
-                        self.settings,
-                        execution.execution_id,
-                    )
-                    self.environment.prepare(run, destination, self.publisher.source(run))
+                await asyncio.to_thread(self.store.save_run, run)
+                run.operation = None
+                return run
+            run.tasks[proposal.task_id] = proposal
+            contents = {
+                r.proposal.target_path: (
+                    await asyncio.to_thread(self.store.read_blob, r.proposal.staged_ref)
+                ).decode()
+                for r in run.tasks.values()
+                if r.proposal
+            }
+            if not self.generator.valid(
+                validate_cross_artifacts(run.plan, contents, root=destination)
+            ):
+                raise AppError(
+                    "cross_artifact_validation_failed", "Repaired artifacts conflict.", 409
+                )
+            await asyncio.to_thread(apply_proposals, destination, run, self.store)
+            execution = run.execution
+            execution.attestation = None
+            execution.previous_plan = execution.plan.model_copy(deep=True)
+            execution.plan = await asyncio.to_thread(
+                build_execution_plan, destination, run.plan, self.settings
+            )
+            _, inventory = await asyncio.to_thread(
+                capture_source, destination, self.settings.max_file_bytes
+            )
+            if (
+                self.environment.source_digest(run, destination)
+                != execution.env_schema.source_digest
+            ):
+                self.environment.clear(run_id)
+                execution.env_schema = EnvFormSchema(source_digest=digest({}))
                 execution.identity = candidate_identity(
                     run,
                     inventory,
@@ -902,7 +989,44 @@ class ArtifactService:
                     self.settings,
                     execution.execution_id,
                 )
-                self.store.save_run(run)
+                (
+                    await asyncio.to_thread(
+                        self.environment.prepare,
+                        run,
+                        destination,
+                        await asyncio.to_thread(self.publisher.source, run),
+                    )
+                )
+            execution.identity = candidate_identity(
+                run,
+                inventory,
+                execution.plan,
+                execution.env_schema,
+                self.settings,
+                execution.execution_id,
+            )
+            await asyncio.to_thread(self.store.save_run, run)
+
+        return await asyncio.to_thread(self.store.load_run, run_id)
+
+    # Start a new user attempt without erasing completed file results or earlier model requests.
+    # Human-input resumes never call this method and therefore cannot reset repair allowances.
+    def begin_workflow_attempt(self, run_id: str, workflow_id: str):
+        previous = self.store.load_run(run_id)
+        with self.store.project_lock(previous.repo_fingerprint):
+            run = self.store.load_run(run_id)
+            self._idle(run)
+            if run.workflow_attempt_id == workflow_id:
+                return run
+            if run.status in {"ready_for_deployment", "rejected", "cancelled"}:
+                raise AppError(
+                    "run_closed", "Start a new workflow from its repository source.", 409
+                )
+            run.workflow_attempt_id, run.repair_cycles = workflow_id, {}
+            if run.execution:
+                self.environment._invalidate(run)
+            self.store.save_run(run)
+            return run
 
     # Signal cancellation to the currently controlled execution, if one exists.
     # For an inactive run, check ownership and use recovery when leftover work needs cleanup.
@@ -911,15 +1035,17 @@ class ArtifactService:
         control = self._controls.get(run_id)
         if control:
             control[1].set()
-        run = self.store.load_run(run_id)
+        run = await asyncio.to_thread(self.store.load_run, run_id)
         if control:
             return run
+        if run.operation and not self._owner_alive(run.operation.owner_process):
+            await self._recover(run)
         with self.store.project_lock(run.repo_fingerprint):
-            run = self.store.load_run(run_id)
+            run = await asyncio.to_thread(self.store.load_run, run_id)
             self._idle(run)
             if run.execution:
                 run.execution.status = "cancelled"
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
             return run
 
     # Record approval or rejection for the exact displayed review and comparison code.
@@ -947,14 +1073,16 @@ class ArtifactService:
     # boundaries.
     # Save errors or the resulting branch information without deploying an application.
     async def publish(self, run_id: str) -> ArtifactRun:
-        previous = self.store.load_run(run_id)
+        previous = await asyncio.to_thread(self.store.load_run, run_id)
         with self.store.project_lock(previous.repo_fingerprint):
-            run = self.store.load_run(run_id)
+            run = await asyncio.to_thread(self.store.load_run, run_id)
             self._idle(run)
             try:
                 if run.execution:
-                    source = self.publisher.source(run)
-                    destination = Path(self.worktrees.inspect(run.worktree_id).location)
+                    source = await asyncio.to_thread(self.publisher.source, run)
+                    destination = Path(
+                        (await asyncio.to_thread(self.worktrees.inspect, run.worktree_id)).location
+                    )
 
                     # Recheck that the configuration session still matches the markers used during
                     # verification.
@@ -971,9 +1099,9 @@ class ArtifactService:
                     await self.publisher.publish(run)
             except AppError as error:
                 run.errors = [error.category]
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
                 raise
             run.warnings.extend(f"Resolved earlier error: {error}" for error in run.errors)
             run.errors = []
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
             return run

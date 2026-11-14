@@ -1,5 +1,9 @@
 # Stage 2 verification
 
+Historical Stage 1–3 evidence below describes the original implementation. Stage 4
+replaces operational JSON files and filesystem locks with MongoDB records and a
+single-process execution boundary. See [Stage 4 decisions](stage4-decisions.md).
+
 Raw logs and demo results are local working records under `.audit/`, which is excluded from Git. The commands below reproduce the checks.
 
 Verified on 2026-11-05 with Python 3.14.8. The Stage 1 baseline was 28 passing tests. The current integrated suite is **110 passed**, with 24 upstream LangSmith/PydanticAI deprecation warnings. The warnings do not indicate skipped tests. `.audit/stage2-pytest.txt` contains the actual result.

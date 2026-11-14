@@ -1,5 +1,9 @@
 # Stage 1 completion report
 
+Historical Stage 1–3 evidence below describes the original implementation. Stage 4
+replaces operational JSON files and filesystem locks with MongoDB records and a
+single-process execution boundary. See [Stage 4 decisions](stage4-decisions.md).
+
 Verified on 2026-11-02 against `GOAL_STAGE_1.md`, using Python 3.14.8 and Git 2.56.0.
 The starting workspace contained the goal document and environment-managed empty metadata directories.
 No original source code existed or was removed. Implementation did not initialize, commit or connect

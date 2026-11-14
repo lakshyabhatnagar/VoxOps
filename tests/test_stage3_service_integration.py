@@ -4,8 +4,9 @@ from uuid import uuid4
 
 import pytest
 from conftest import copy_fixture, settings_for
-from demo_stage2 import demo_app
+from domain_steps import advance_candidate, artifact_step
 from fastapi.testclient import TestClient
+from pipeline_fixtures import demo_app
 from simulated_docker import DemoDocker
 from test_artifact_generation import CI, offline_agent
 from test_execution_adapters import AdapterDocker
@@ -22,6 +23,7 @@ from voxops.repository.path_policy import fingerprint
 from voxops.repository.snapshot import capture_source
 from voxops.repository.worktree_manager import WorktreeManager
 from voxops.storage.artifact_store import ArtifactStore
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -45,7 +47,7 @@ def integration_fixture(tmp_path, *, large_lockfile=False):
     git(source, "push", str(bare), "main")
     git(source, "remote", "add", "origin", "https://github.com/example/project.git")
     settings = settings_for(tmp_path)
-    scans, store = ScanStore(settings.data_dir), ArtifactStore(settings.data_dir)
+    scans, store = ScanStore(database_for(settings)), ArtifactStore(database_for(settings))
     manager = WorktreeManager(settings, scans)
     manager.root = tmp_path / "worktrees"
     publisher = GitPublisher(settings, store, manager, FakeGitHub(True), LocalGit(settings, bare))
@@ -98,11 +100,15 @@ def test_api_environment_verification_review_and_local_push(tmp_path, large_lock
         prefix = f"/api/v1/artifact-runs/{run.run_id}"
 
         def request(method, suffix, body=None):
-            response = client.request(method, prefix + suffix, json=body)
+            response = (
+                artifact_step(client, suffix, prefix.rsplit("/", 1)[-1])
+                if suffix in {"advance", "publish"}
+                else client.request(method, prefix + suffix, json=body)
+            )
             assert response.status_code == 200, response.text
             return response.json()
 
-        result = request("POST", "/execute")
+        result = request("POST", "advance")
         assert result["execution"]["status"] == "waiting_for_env", result["errors"]
         form = request("GET", "/verification/env-form")
         field = next(
@@ -124,9 +130,9 @@ def test_api_environment_verification_review_and_local_push(tmp_path, large_lock
                 "values": {field["field_id"]: "synthetic-secret-value"},
             },
         )
-        result = request("POST", "/execute")
+        result = request("POST", "advance")
         assert result["execution"]["status"] == "passed", result["errors"]
-        premature = client.post(prefix + "/publish")
+        premature = artifact_step(client, "publish", prefix.rsplit("/", 1)[-1])
         assert premature.status_code == 409
         assert service.store.load_run(run.run_id).errors == ["approval_required"]
         review = request("GET", "/review")["review"]
@@ -139,7 +145,7 @@ def test_api_environment_verification_review_and_local_push(tmp_path, large_lock
                 "decision": "approve",
             },
         )
-        published = request("POST", "/publish")
+        published = request("POST", "publish")
         assert published["result"]["remote_sha"] == published["result"]["commit_sha"]
         assert published["result"]["deployment_executed"] is False
         assert published["errors"] == []
@@ -198,7 +204,7 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
             ).status_code
             == 200
         )
-        client.post(prefix + "/execute")
+        artifact_step(client, "advance", prefix.rsplit("/", 1)[-1])
         form = client.get(prefix + "/verification/env-form").json()
         field = next(
             item for item in form["schema"]["requirements"] if item["name"] == "DATABASE_URL"
@@ -213,7 +219,7 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
             ).status_code
             == 200
         )
-        result = client.post(prefix + "/execute").json()
+        result = artifact_step(client, "advance", prefix.rsplit("/", 1)[-1]).json()
         assert result["execution"]["status"] == "verification_incomplete", result["execution"][
             "units"
         ]
@@ -226,7 +232,7 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
                 return driver
 
             service.driver_factory = recovered_driver
-            retried = client.post(prefix + "/execute")
+            retried = artifact_step(client, "advance", prefix.rsplit("/", 1)[-1])
             assert retried.status_code == 200, retried.text
             assert retried.json()["execution"]["status"] == "passed"
             assert drivers
@@ -239,7 +245,7 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
             "decision": "approve",
         }
         assert client.post(prefix + "/approvals", json=approval).status_code == 409
-        assert client.post(prefix + "/publish").status_code == 409
+        assert artifact_step(client, "publish", prefix.rsplit("/", 1)[-1]).status_code == 409
         attestation = review["execution_attestation"]
         missing = [
             check["check_id"]
@@ -255,7 +261,7 @@ def test_external_service_incomplete_requires_acknowledgement(tmp_path, retry):
             "acknowledged": True,
         }
         assert client.post(prefix + "/approvals", json=approval).status_code == 200
-        published = client.post(prefix + "/publish")
+        published = artifact_step(client, "publish", prefix.rsplit("/", 1)[-1])
         assert published.status_code == 200, published.text
         result = published.json()["result"]
         assert result["verification_status"] == "verification_incomplete"
@@ -269,7 +275,7 @@ def test_model_usage_includes_successful_and_failed_repairs(tmp_path, repair_suc
     The saved attempt records include calls even when a correction fails.
     The API run summary must report those same request and token totals.
     """
-    from demo_stage3 import fixture_agent
+    from model_fixtures import fixture_agent
 
     async def exercise():
         app, source, _ = demo_app(tmp_path, bootstrap=True)
@@ -306,7 +312,7 @@ def test_model_usage_includes_successful_and_failed_repairs(tmp_path, repair_suc
                 return await original_run(prompt, **kwargs)
 
             original.run = respond
-        result = await service.execute(run.run_id)
+        result = await advance_candidate(service, run.run_id)
         attempts = [
             attempt
             for task in result.plan.tasks.values()

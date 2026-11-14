@@ -52,6 +52,13 @@ async def analyze(body: AnalyzeRequest, request: Request) -> AnalysisResult:
     return await request.app.state.workflow.analyze(body.path, body.use_llm)
 
 
+@router.get("/api/v1/scans/{scan_id}", response_model=AnalysisResult)
+# Read a saved analysis so workflow polling need not return the entire scan every time.
+# Source paths are represented by existing safe relative evidence and repository fingerprints.
+def inspect_scan(scan_id: str, request: Request) -> AnalysisResult:
+    return request.app.state.store.load(scan_id)
+
+
 @router.post("/api/v1/worktrees", response_model=WorktreeRecord, status_code=201)
 # Creates a separate working copy of committed project files.
 # Checks the source and assigns a branch through the worktree manager.

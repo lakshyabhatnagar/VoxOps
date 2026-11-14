@@ -17,6 +17,7 @@ from voxops.execution.environment import SecretSession
 from voxops.execution.planner import build_execution_plan, freeze_plan_contexts
 from voxops.execution.runner import ExecutionRunner
 from voxops.repository.snapshot import capture_source
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -61,11 +62,13 @@ async def main():
         )
         settings = Settings(
             allowed_roots=[base],
-            data_dir=base / "records",
+            mongo_database="voxops_smoke_" + base.name.replace("-", "_"),
             build_timeout_seconds=600,
             startup_timeout_seconds=45,
         )
-        analysis = await Stage1Workflow(settings, ScanStore(settings.data_dir)).analyze(str(root))
+        analysis = await Stage1Workflow(settings, ScanStore(database_for(settings))).analyze(
+            str(root)
+        )
         assert {unit.framework for unit in analysis.detected_units} == {"fastapi", "react_vite"}
         assert len(analysis.detected_units) == 2
         strategies = {

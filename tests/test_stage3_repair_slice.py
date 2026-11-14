@@ -36,6 +36,7 @@ from voxops.execution.readiness import HTTPObservation
 from voxops.execution.repair import propose_repair
 from voxops.execution.runner import ExecutionRunner
 from voxops.storage.artifact_store import ArtifactStore, digest
+from voxops.storage.mongodb import database_for
 
 
 def authorized_run(run_id, plan, task, result, root, store):
@@ -62,7 +63,7 @@ def test_existing_file_repair_uses_same_ledger_and_parent(tmp_path):
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     generator = ArtifactGenerator(
         settings, store, offline_agent(lambda packet, content: content + "# fix\n")
     )
@@ -113,7 +114,9 @@ def test_existing_file_repair_uses_same_ledger_and_parent(tmp_path):
     with pytest.raises(AppError):
         apply_proposals(root, run, store)
     (root / "Dockerfile").write_text(DOCKER + "# fix\n")
-    (store.directory / "artifact-blobs" / repaired.proposal.staged_ref).write_text("corrupt")
+    store.database.artifact_blobs.update_one(
+        {"_id": repaired.proposal.staged_ref}, {"$set": {"content": b"corrupt"}}
+    )
     with pytest.raises(AppError):
         apply_proposals(root, run, store)
 
@@ -124,7 +127,7 @@ def test_existing_proposal_refuses_changed_baseline(tmp_path):
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     generator = ArtifactGenerator(settings, store, offline_agent())
     run_id = uuid4().hex
     result = asyncio.run(generator.generate(run_id, root, task, plan, ModelBudget(settings)))
@@ -155,7 +158,9 @@ def test_repair_may_rewrite_existing_artifact(tmp_path):
     )
     settings = settings_for(tmp_path)
     generator = ArtifactGenerator(
-        settings, ArtifactStore(settings.data_dir), offline_agent(lambda packet, content: rewritten)
+        settings,
+        ArtifactStore(database_for(settings)),
+        offline_agent(lambda packet, content: rewritten),
     )
     run_id = uuid4().hex
     budget = ModelBudget(settings)
@@ -183,7 +188,7 @@ def test_repair_keeps_persisted_attempt_limit_across_generators(tmp_path):
     plan = build_plan(root, analysis, plan.strategy_by_unit)
     task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     calls = []
     agent = offline_agent(lambda packet, content: calls.append(packet) or content)
     run_id = uuid4().hex
@@ -338,29 +343,69 @@ def test_operator_blocker_is_scoped_to_optional_default_and_missing_checks():
 
 
 def test_operator_normalization_preserves_real_timeout_and_redacts_explanation():
-    schema = EnvFormSchema(source_digest="0" * 64, requirements=[EnvRequirement(
-        field_id="db", name="DATABASE_URL", necessity="optional", default_kind="literal",
-        resolution="default", visibility="secret",
-        consumers=[EnvConsumer(unit_id="api", phase="runtime")],
-    )])
+    schema = EnvFormSchema(
+        source_digest="0" * 64,
+        requirements=[
+            EnvRequirement(
+                field_id="db",
+                name="DATABASE_URL",
+                necessity="optional",
+                default_kind="literal",
+                resolution="default",
+                visibility="secret",
+                consumers=[EnvConsumer(unit_id="api", phase="runtime")],
+            )
+        ],
+    )
     original = ExecutionDiagnostic(
-        diagnostic_id="timeout", task_id="api:startup", unit_id="api", category="TIMEOUT",
-        stage="startup", message="Startup exceeded deadline.",
+        diagnostic_id="timeout",
+        task_id="api:startup",
+        unit_id="api",
+        category="TIMEOUT",
+        stage="startup",
+        message="Startup exceeded deadline.",
     )
     attempt = ExecutionAttempt(
-        attempt_id="attempt", task_id="api:startup", unit_id="api", input_digest="0" * 64,
-        attempt_number=1, status="failed", ended_at=datetime.now(UTC), diagnostics=[original],
+        attempt_id="attempt",
+        task_id="api:startup",
+        unit_id="api",
+        input_digest="0" * 64,
+        attempt_number=1,
+        status="failed",
+        ended_at=datetime.now(UTC),
+        diagnostics=[original],
     )
-    checks = {"build": CheckResult(check_id="api:build", kind="build", status="passed",
-                                   attempt_id="build", evidence=["built"])}
+    checks = {
+        "build": CheckResult(
+            check_id="api:build",
+            kind="build",
+            status="passed",
+            attempt_id="build",
+            evidence=["built"],
+        )
+    }
     for kind in ("startup", "http"):
-        checks[kind] = CheckResult(check_id=f"api:{kind}", kind=kind, status="failed",
-                                   attempt_id="attempt", diagnostic_ids=["timeout"])
-    unit = UnitVerification(unit_id="api", input_digest="0" * 64, required_level="http_responded",
-                            status="failed", checks=checks, diagnostics=[original])
+        checks[kind] = CheckResult(
+            check_id=f"api:{kind}",
+            kind=kind,
+            status="failed",
+            attempt_id="attempt",
+            diagnostic_ids=["timeout"],
+        )
+    unit = UnitVerification(
+        unit_id="api",
+        input_digest="0" * 64,
+        required_level="http_responded",
+        status="failed",
+        checks=checks,
+        diagnostics=[original],
+    )
     declaration = OperatorExternalBlocker(
-        blocker_id="a" * 32, unit_id="api", dependency_name="DATABASE_URL",
-        explanation="Database synthetic-private-value is unavailable.", checks=["startup", "http"],
+        blocker_id="a" * 32,
+        unit_id="api",
+        dependency_name="DATABASE_URL",
+        explanation="Database synthetic-private-value is unavailable.",
+        checks=["startup", "http"],
     )
     result = normalize_operator_blocker(
         declaration, unit, schema, attempt, SecretSession(schema, {"db": "synthetic-private-value"})
@@ -440,7 +485,7 @@ def test_simulated_execution_drives_two_repairs_on_original_ledger(tmp_path, mon
     root, _, plan = fixture_plan(tmp_path, "fastapi_only", {"fastapi": "container"})
     task = next(task for task in plan.tasks.values() if task.artifact_type == "dockerfile")
     settings = settings_for(tmp_path)
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     calls = []
     definition = (
         "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\nUSER 1000\n"

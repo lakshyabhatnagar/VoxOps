@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import tempfile
@@ -22,28 +21,21 @@ class WorktreeManager:
     # Uses a local temporary directory and a private ownership registry.
     def __init__(self, settings: Settings, store: ScanStore):
         self.settings, self.store = settings, store
-        self.root = (
-            Path(tempfile.gettempdir()).resolve() / f"voxops-{fingerprint(store.directory)}"
-        )
+        self.root = Path(tempfile.gettempdir()).resolve() / f"voxops-{store.database.name}"
         self.lock = RLock()
 
-    # Finds the registry file for a working copy.
-    # Accepts only identifiers in the expected generated format.
-    def record_path(self, identifier: str) -> Path:
+    # Read the durable ownership record before touching a temporary worktree.
+    # Validate its identifier and saved shape independently of filesystem contents.
+    def load(self, identifier: str) -> tuple[WorktreeRecord, Path]:
         if not re.fullmatch(r"[a-f0-9]{32}", identifier):
             raise AppError("worktree_not_found", "Unknown worktree identifier.", 404)
-        return self.store.directory / f"worktree-{identifier}.json"
-
-    # Loads the ownership record for a working copy.
-    # Checks that its destination is inside the managed directory.
-    def load(self, identifier: str) -> tuple[WorktreeRecord, Path]:
+        raw = self.store.database.workspaces.find_one({"_id": identifier})
+        if raw is None:
+            raise AppError("worktree_not_found", "Unknown worktree identifier.", 404)
         try:
-            raw = json.loads(self.record_path(identifier).read_text())
             record = WorktreeRecord.model_validate(raw["record"])
             source = Path(raw["source"])
-        except FileNotFoundError:
-            raise AppError("worktree_not_found", "Unknown worktree identifier.", 404) from None
-        except (OSError, ValueError, KeyError):
+        except (ValueError, KeyError):
             raise AppError(
                 "registry_invalid", "Worktree ownership record is unavailable.", 409
             ) from None
@@ -61,9 +53,10 @@ class WorktreeManager:
     # Saves the current record for a working copy.
     # Stores its source path separately from the public details.
     def save(self, record: WorktreeRecord, source: Path) -> None:
-        self.store.write(
-            f"worktree-{record.id}.json",
-            {"record": record.model_dump(mode="json"), "source": str(source)},
+        self.store.database.workspaces.replace_one(
+            {"_id": record.id},
+            {"_id": record.id, "record": record.model_dump(mode="json"), "source": str(source)},
+            upsert=True,
         )
 
     # Creates a managed working copy at the source's current commit.
@@ -173,8 +166,8 @@ class WorktreeManager:
     # Inspects each registered copy and returns its current status.
     def list(self) -> list[WorktreeRecord]:
         return [
-            self.inspect(path.stem.removeprefix("worktree-"))
-            for path in sorted(self.store.directory.glob("worktree-*.json"))
+            self.inspect(record["_id"])
+            for record in self.store.database.workspaces.find({}, {"_id": 1}).sort("_id", 1)
         ]
 
     # Removes a managed working copy and its recorded branch.

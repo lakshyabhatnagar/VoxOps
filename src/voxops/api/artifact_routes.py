@@ -127,15 +127,6 @@ async def select_source(run_id: str, body: SourceSelection, request: Request):
     return await request.app.state.artifacts.select_source(run_id, body.paths)
 
 
-# Continue generation or verification for the saved run.
-# The service decides whether to generate files, request configuration, retry checks, or prepare
-# final review.
-# This route contains no separate Docker or repair logic.
-@router.post("/{run_id}/execute", response_model=ArtifactRun)
-async def execute_run(run_id: str, request: Request):
-    return await request.app.state.artifacts.execute(run_id)
-
-
 # Return the most recently created review and the run's saved decisions.
 # Reject the request when no review has been prepared yet.
 # The returned diff and comparison code are the exact contents the user is being asked to approve.
@@ -156,15 +147,6 @@ def approve(run_id: str, body: ApprovalRequest, request: Request):
     return request.app.state.artifacts.approve(
         run_id, body.review_id, body.digest, body.decision, body.incomplete_acknowledgement
     )
-
-
-# Ask the service to publish the approved branch.
-# The service and publisher recheck verification, configuration, and approval before Git
-# operations.
-# Return the run with its publication outcome; this does not deploy the app.
-@router.post("/{run_id}/publish", response_model=ArtifactRun)
-async def publish(run_id: str, request: Request):
-    return await request.app.state.artifacts.publish(run_id)
 
 
 # Return the run's current status, errors, and saved publication result.

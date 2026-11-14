@@ -1,5 +1,9 @@
 # Stage 2 decisions
 
+Historical Stage 1–3 evidence below describes the original implementation. Stage 4
+replaces operational JSON files and filesystem locks with MongoDB records and a
+single-process execution boundary. See [Stage 4 decisions](stage4-decisions.md).
+
 ## Artifact planning
 
 Each detected unit needs an explicit `container`, `static`, or `native` strategy. The planner rejects combinations that conflict with detected runtime. It creates Docker tasks only for container units, with one root `.dockerignore` and one repository CI task. Existing files are validated before repair. A valid existing artifact keeps its content and hash. Source changes require an explicit path, expected hash, reason, and correction.

@@ -1,5 +1,4 @@
 import asyncio
-import json
 
 from conftest import copy_fixture, settings_for
 from pydantic_ai import Agent
@@ -10,6 +9,7 @@ from voxops.analysis.topology_resolver import TopologyResolver
 from voxops.core.errors import AppError
 from voxops.frameworks.registry import detect_units
 from voxops.repository.filesystem_scanner import scan_repository
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 from voxops.workflows.stage1_graph import Stage1Workflow
 
@@ -19,13 +19,13 @@ from voxops.workflows.stage1_graph import Stage1Workflow
 def test_graph_no_key_and_persistence(tmp_path):
     root = copy_fixture(tmp_path, "nextjs_fullstack")
     settings = settings_for(tmp_path)
-    store = ScanStore(settings.data_dir)
+    store = ScanStore(database_for(settings))
     workflow = Stage1Workflow(settings, store)
     result = asyncio.run(workflow.analyze(str(root), use_llm=True))
     assert result.deterministic_only and result.ai_usage.status == "unavailable"
     assert result.detected_units[0].role == "fullstack_web"
     assert any("credential" in warning for warning in result.warnings)
-    saved = json.loads((settings.data_dir / f"scan-{result.scan.id}.json").read_text())
+    saved = store.load(result.scan.id).model_dump(mode="json")
     assert saved == result.model_dump(mode="json")
     assert "path" not in saved["scan"]
 
@@ -50,7 +50,7 @@ def test_mocked_structured_topology_and_precedence(tmp_path):
     model = TestModel(custom_output_args=output)
     agent = Agent(model, output_type=TopologyOutput, instructions=INSTRUCTIONS)
     resolver = TopologyResolver(settings, agent)
-    workflow = Stage1Workflow(settings, ScanStore(settings.data_dir), resolver)
+    workflow = Stage1Workflow(settings, ScanStore(database_for(settings)), resolver)
     result = asyncio.run(workflow.analyze(str(root)))
     assert not result.deterministic_only
     assert result.ai_usage.requests == 1
@@ -78,7 +78,7 @@ def test_mocked_structured_topology_and_precedence(tmp_path):
 
 # Trigger invalid model output, a policy error, and a storage failure.
 # Check that the analysis reports each failure appropriately.
-def test_graph_failure_transitions(tmp_path):
+def test_graph_failure_transitions(tmp_path, monkeypatch):
     root = copy_fixture(tmp_path, "vite_only")
     settings = settings_for(tmp_path)
     agent = Agent(
@@ -87,7 +87,7 @@ def test_graph_failure_transitions(tmp_path):
         retries=0,
     )
     workflow = Stage1Workflow(
-        settings, ScanStore(settings.data_dir), TopologyResolver(settings, agent)
+        settings, ScanStore(database_for(settings)), TopologyResolver(settings, agent)
     )
     result = asyncio.run(workflow.analyze(str(root), use_llm=True))
     assert result.deterministic_only and result.ai_usage.status == "failed"
@@ -98,9 +98,14 @@ def test_graph_failure_transitions(tmp_path):
         assert error.category == "path_traversal"
     else:
         raise AssertionError("Traversal was accepted")
-    blocked = tmp_path / "blocked"
-    blocked.write_text("not a directory")
-    workflow = Stage1Workflow(settings, ScanStore(blocked))
+    from pymongo.errors import ConnectionFailure
+
+    # Simulate a failed database write at the actual persistence boundary.
+    # Analysis must report storage failure instead of returning an unsaved success.
+    def unavailable(*args, **kwargs):
+        raise ConnectionFailure("test database unavailable")
+
+    monkeypatch.setattr(workflow.store.database.repository_scans, "replace_one", unavailable)
     try:
         asyncio.run(workflow.analyze(str(root)))
     except AppError as error:

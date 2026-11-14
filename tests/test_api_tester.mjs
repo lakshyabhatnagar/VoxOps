@@ -6,6 +6,24 @@ const elements = new Map();
 const buttons = [{disabled: false}];
 const requests = [];
 let nextResponse = {};
+const timers = new Map();
+
+// Remember browser event handlers so workflow tests can click the actual review control.
+// No synthetic replacement of the page's review logic is installed.
+function listen(type, handler) { this.listeners[type] = handler; }
+
+// Record polling callbacks without starting a real timer in the test process.
+// Tests explicitly supply each server response before invoking the next status request.
+function interval(callback, milliseconds) {
+  assert.equal(milliseconds, 3000);
+  const id = timers.size + 1;
+  timers.set(id, callback);
+  return id;
+}
+
+// Remove a recorded poll when the real page reaches a waiting or terminal state.
+// This lets the test verify that polling cannot replace the displayed review.
+function clear(id) { timers.delete(id); }
 
 // Pretends the test form contains valid input.
 // Returns true so the test can reach the code that sends the request.
@@ -20,7 +38,7 @@ function noop() {}
 function element(id) {
   if (!elements.has(id)) elements.set(id, {
     value: '', textContent: '', dataset: {}, reportValidity: valid,
-    focus: noop, replaceChildren: noop, append: noop, addEventListener: noop,
+    focus: noop, replaceChildren: noop, append: noop, addEventListener: listen, listeners: {},
   });
   return elements.get(id);
 }
@@ -59,6 +77,7 @@ async function request(url, options) {
 const page = readFileSync(new URL('../src/voxops/static/index.html', import.meta.url), 'utf8');
 const context = vm.createContext({
   HTMLFormElement: Form, FormData: Fields, fetch: request,
+  setInterval: interval, clearInterval: clear,
   document: {getElementById: element, querySelectorAll: queryButtons,
     addEventListener: noop, createElement: element},
 });
@@ -110,4 +129,34 @@ assert.match(element('summary').textContent, /<script>untrusted<\/script>/);
 assert.equal(JSON.parse(requests.at(-1).body).mode, 'transcript');
 await submit('service', [], 'ready');
 assert.equal(requests.at(-1).url, '/ready');
-console.log('API tester request, rendering, ID and cleanup-policy checks passed.');
+
+element('workflow-repository').value = 'https://github.com/example/project';
+element('workflow-key').value = 'client-key-123';
+nextResponse = {workflow_id: 'workflow-1', status: 'created'};
+await context.workflowAction('create');
+assert.equal(requests.at(-1).url, '/api/v1/workflows');
+assert.equal(requests.at(-1).headers['Idempotency-Key'], 'client-key-123');
+assert.deepEqual(JSON.parse(requests.at(-1).body), {repository_url: 'https://github.com/example/project', ref: null});
+assert.equal(timers.size, 1);
+const review = {review_id: 'review-1', digest: 'digest-1', diff: 'the exact reviewed change'};
+nextResponse = {workflow_id: 'workflow-1', artifact_run_id: 'run-1', status: 'waiting_for_approval',
+  pending: [{kind: 'final_review', review_id: review.review_id, digest: review.digest}]};
+await context.workflowAction('status');
+assert.equal(timers.size, 0);
+const unapprovedRequests = requests.length;
+await context.decideWorkflow('approve');
+assert.equal(requests.length, unapprovedRequests);
+nextResponse = {review: {...review, digest: 'stale-digest'}};
+await element('review-load').listeners.click();
+const staleRequests = requests.length;
+await context.decideWorkflow('approve');
+assert.equal(requests.length, staleRequests);
+nextResponse = {review};
+await element('review-load').listeners.click();
+assert.match(element('response').textContent, /the exact reviewed change/);
+nextResponse = {workflow_id: 'workflow-1', status: 'running'};
+await context.decideWorkflow('approve');
+assert.equal(requests.at(-1).url, '/api/v1/workflows/workflow-1/resume');
+assert.deepEqual(JSON.parse(requests.at(-1).body), {review_id: review.review_id, digest: review.digest, decision: 'approve'});
+assert.equal(timers.size, 1);
+console.log('API tester requests, environment gates, workflow polling and exact displayed-review approval checks passed.');

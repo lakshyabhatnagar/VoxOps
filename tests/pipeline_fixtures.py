@@ -1,12 +1,11 @@
 """Offline Stage 2 demo. All Git writes stay inside a newly created disposable directory."""
 
-import argparse
 import json
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
+from domain_steps import artifact_step
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, ToolCallPart
@@ -23,6 +22,7 @@ from voxops.main import create_app
 from voxops.repository.git_executor import GitExecutor
 from voxops.repository.snapshot import capture_source
 from voxops.storage.artifact_store import ArtifactStore
+from voxops.storage.mongodb import database_for
 
 
 # Runs Git commands for the example without sending any files to GitHub.
@@ -191,10 +191,12 @@ def demo_app(directory: Path, fixture: str = "fastapi_only", bootstrap: bool = F
             check=True,
             capture_output=True,
         )
-    settings = Settings(allowed_roots=[directory], data_dir=directory / "records")
+    settings = Settings(
+        allowed_roots=[directory], mongo_database="voxops_demo_" + directory.name.replace("-", "_")
+    )
     app = create_app(settings)
     app.state.worktrees.root = directory / "worktrees"
-    store = ArtifactStore(settings.data_dir)
+    store = ArtifactStore(database_for(settings))
     publisher = GitPublisher(
         settings,
         store,
@@ -209,8 +211,8 @@ def demo_app(directory: Path, fixture: str = "fastapi_only", bootstrap: bool = F
         ArtifactGenerator(settings, store, demo_agent()),
         publisher,
     )
-    app.state.artifacts.driver_factory = (
-        lambda unit_id, journal, cancel, session: DemoDocker(settings, journal, cancel, session)
+    app.state.artifacts.driver_factory = lambda unit_id, journal, cancel, session: DemoDocker(
+        settings, journal, cancel, session
     )
     return app, source, remote
 
@@ -266,7 +268,7 @@ def run_demo(
                     },
                 )
             )
-        run = response_json(client.post(prefix + "/execute"))
+        run = response_json(artifact_step(client, "advance", prefix.rsplit("/", 1)[-1]))
         if run["status"] != "awaiting_review":
             raise RuntimeError(f"Generation did not reach review: {run['errors']}")
         review = response_json(client.get(prefix + "/review"))["review"]
@@ -282,9 +284,9 @@ def run_demo(
             )
         )
         if reject:
-            assert client.post(prefix + "/publish").status_code == 409
+            assert artifact_step(client, "publish", prefix.rsplit("/", 1)[-1]).status_code == 409
         else:
-            response_json(client.post(prefix + "/publish"))
+            response_json(artifact_step(client, "publish", prefix.rsplit("/", 1)[-1]))
         result = response_json(client.get(prefix + "/result"))
         if not reject:
             sha = subprocess.run(
@@ -299,41 +301,3 @@ def run_demo(
         result["offline"] = True
         result["reviewed_paths"] = [file["path"] for file in review["files"]]
         return result
-
-
-# Reads the example options and creates a new folder for its temporary project.
-# Runs the offline example, prints its result, and keeps the folder only when requested.
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        required=True,
-        help="Required acknowledgement that model and MCP adapters are fake",
-    )
-    parser.add_argument("--reject", action="store_true", help="Reject the artifact review")
-    parser.add_argument(
-        "--fixture",
-        choices=["fastapi_only", "vite_only"],
-        default="fastapi_only",
-        help="Checked-in fixture copied to the disposable repository",
-    )
-    parser.add_argument(
-        "--bootstrap", action="store_true", help="Approve a fake private baseline first"
-    )
-    parser.add_argument(
-        "--keep", type=Path, help="Create this new directory and retain the evidence"
-    )
-    args = parser.parse_args()
-    if args.keep:
-        args.keep.mkdir(mode=0o700, parents=False, exist_ok=False)
-        result = run_demo(args.keep.resolve(), args.reject, args.bootstrap, args.fixture)
-        result["evidence_directory"] = str(args.keep.resolve())
-    else:
-        with tempfile.TemporaryDirectory(prefix="voxops-stage2-demo-") as folder:
-            result = run_demo(Path(folder), args.reject, args.bootstrap, args.fixture)
-    print(json.dumps(result, indent=2))
-
-
-if __name__ == "__main__":
-    main()

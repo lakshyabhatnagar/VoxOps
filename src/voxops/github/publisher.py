@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -124,16 +125,16 @@ class GitPublisher:
             raise AppError("run_closed", "This run is closed; create a new plan and run.", 409)
         if run.source_branch is None:
             binding = workspace_path(
-                str(self.store.source(run.run_id)), self.settings.allowed_roots
+                str(await asyncio.to_thread(self.store.source, run.run_id)),
+                self.settings.allowed_roots,
             )
             run.source_branch = (
-                self.executor.run(binding, "symbolic-ref", "--short", "HEAD", check=False)
-                .decode()
-                .strip()
-                or "main"
-            )
-        source = self.source(run)
-        existing = self.has_remote(source, run)
+                await asyncio.to_thread(
+                    self.executor.run, binding, "symbolic-ref", "--short", "HEAD", check=False
+                )
+            ).decode().strip() or "main"
+        source = await asyncio.to_thread(self.source, run)
+        existing = await asyncio.to_thread(self.has_remote, source, run)
         await self.connection.probe(require_create=not existing)
         actual = await self.connection.lookup(run.target)
         if existing:
@@ -159,12 +160,12 @@ class GitPublisher:
                     "private_repository_required", "New repositories must be private.", 409
                 )
             run.target.clone_url = f"https://github.com/{run.target.owner}/{run.target.name}.git"
-        head = self.executor.head(source)
+        head = await asyncio.to_thread(self.executor.head, source)
         if head:
-            self.executor.scan_history(source, head)
+            await asyncio.to_thread(self.executor.scan_history, source, head)
         if not existing:
             if head:
-                before = self.executor.tree(source, head)
+                before = await asyncio.to_thread(self.executor.tree, source, head)
                 if selected_paths is not None and set(selected_paths) != set(before):
                     raise AppError(
                         "baseline_selection",
@@ -173,7 +174,7 @@ class GitPublisher:
                     )
                 files = []
                 for path, facts in before.items():
-                    content = self.executor.blob(source, facts["object"])
+                    content = await asyncio.to_thread(self.executor.blob, source, facts["object"])
                     files.append(
                         ReviewedFile(
                             path=path,
@@ -181,34 +182,39 @@ class GitPublisher:
                             before_hash=None,
                             after_hash=facts["hash"],
                             mode=facts["mode"],
-                            staged_ref=self.store.stage(content),
+                            staged_ref=(await asyncio.to_thread(self.store.stage, content)),
                         )
                     )
             else:
-                files = snapshot_files(source, selected_paths or [], self.store)
-            _, inventory = capture_source(source, self.settings.max_file_bytes)
+                files = await asyncio.to_thread(
+                    snapshot_files, source, selected_paths or [], self.store
+                )
+            _, inventory = await asyncio.to_thread(
+                capture_source, source, self.settings.max_file_bytes
+            )
             build_review(
                 run,
                 "baseline_publication",
                 files,
-                file_diff(files, self.store),
+                await asyncio.to_thread(file_diff, files, self.store),
                 head,
                 excluded_paths=sorted(
-                    set(inventory) - {file.path for file in files} | set(source_exclusions(source))
+                    set(inventory) - {file.path for file in files}
+                    | set(await asyncio.to_thread(source_exclusions, source))
                 ),
             )
             run.status = "awaiting_source_publication"
         elif head:
             run.progress.baseline_sha = head
             run.progress.baseline_pushed = True
-            self.snapshot_review(run, source, selected_paths)
+            await asyncio.to_thread(self.snapshot_review, run, source, selected_paths)
         else:
             raise AppError(
                 "missing_initial_commit",
                 "An existing remote requires a selected local baseline commit.",
                 409,
             )
-        self.store.save_run(run)
+        await asyncio.to_thread(self.store.save_run, run)
         return run
 
     # Builds a review of uncommitted source changes.
@@ -291,7 +297,7 @@ class GitPublisher:
                     "remote_mismatch", "Previously verified GitHub repository is unavailable.", 409
                 )
             run.progress.creation_intent = True
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
             await self.connection.create(run.target, creation_id=run.run_id)
             actual = await self.connection.lookup(run.target, creation_id=run.run_id)
         elif not run.progress.creation_intent:
@@ -306,7 +312,7 @@ class GitPublisher:
             )
         run.target = actual
         run.progress.repository_verified = True
-        self.store.save_run(run)
+        await asyncio.to_thread(self.store.save_run, run)
 
     # Creates the approved starting commit when one is needed.
     # Uses a separate Git index so unrelated staged files stay untouched.
@@ -508,9 +514,9 @@ class GitPublisher:
     async def prepare(self, run: ArtifactRun) -> ArtifactRun:
         if run.status in {"rejected", "cancelled"}:
             raise AppError("approval_rejected", "Run was rejected or cancelled.", 409)
-        source = self.source(run)
+        source = await asyncio.to_thread(self.source, run)
         if run.tasks and run.worktree_id:
-            self.ensure_worktree(run, source)
+            await asyncio.to_thread(self.ensure_worktree, run, source)
             run.status = "generating"
             return run
         baseline_reviews = [
@@ -519,13 +525,25 @@ class GitPublisher:
         if baseline_reviews and not run.progress.baseline_pushed:
             review = require_approval(run, "baseline_publication")
             await self.ensure_repository(run)
-            source = self.source(run)
-            self.ensure_baseline(run, source, review)
-            if not self.has_remote(source, run):
-                self.executor.run(source, "remote", "add", "origin", run.target.clone_url)
-            self.executor.push(source, run.target.clone_url, "main", run.progress.baseline_sha)
+            source = await asyncio.to_thread(self.source, run)
+            await asyncio.to_thread(self.ensure_baseline, run, source, review)
+            if not (await asyncio.to_thread(self.has_remote, source, run)):
+                (
+                    await asyncio.to_thread(
+                        self.executor.run, source, "remote", "add", "origin", run.target.clone_url
+                    )
+                )
+            (
+                await asyncio.to_thread(
+                    self.executor.push,
+                    source,
+                    run.target.clone_url,
+                    "main",
+                    run.progress.baseline_sha,
+                )
+            )
             run.progress.baseline_pushed = True
-            self.store.save_run(run)
+            await asyncio.to_thread(self.store.save_run, run)
         if not run.progress.baseline_sha:
             raise AppError(
                 "baseline_missing", "Run needs a verified committed source baseline.", 409
@@ -535,16 +553,16 @@ class GitPublisher:
             raise AppError("remote_mismatch", "Verified repository metadata changed.", 409)
         snapshots = [item for item in run.reviews.values() if item.purpose == "source_snapshot"]
         if not snapshots and run.source_head_sha:
-            self.snapshot_review(run, source)
+            await asyncio.to_thread(self.snapshot_review, run, source)
             if run.status == "awaiting_source_publication":
-                self.store.save_run(run)
+                await asyncio.to_thread(self.store.save_run, run)
                 return run
         snapshot = require_approval(run, "source_snapshot") if snapshots else None
-        destination = self.ensure_worktree(run, source)
+        destination = await asyncio.to_thread(self.ensure_worktree, run, source)
         if snapshot:
-            self.apply_snapshot(run, destination, snapshot)
+            await asyncio.to_thread(self.apply_snapshot, run, destination, snapshot)
         run.status = "generating"
-        self.store.save_run(run)
+        await asyncio.to_thread(self.store.save_run, run)
         return run
 
     # Compare the generated candidate with its approved baseline and build the final file review.
@@ -695,7 +713,7 @@ class GitPublisher:
     # Verify the remote branch SHA afterward and return that exact branch and commit as the
     # result.
     async def publish(self, run: ArtifactRun, *, authority=None) -> GitPublishResult:
-        source = self.source(run)
+        source = await asyncio.to_thread(self.source, run)
         review = require_approval(run, "artifact_publication")
         if set(run.tasks) != set(run.plan.tasks) or any(
             result.status not in {"passed", "validated_existing", "skipped"}
@@ -707,16 +725,24 @@ class GitPublisher:
             raise AppError(
                 "remote_mismatch", "Approved GitHub repository identity or permission changed.", 409
             )
-        source = self.source(run)
-        destination = self.ensure_worktree(run, source)
-        tree = self.executor.reviewed_tree(destination, review.parent_sha, review.files, self.store)
-        self.verify_worktree(run, destination, review, tree)
-        require_publishable(run, review, self.executor.tree(destination, tree), self.settings)
+        source = await asyncio.to_thread(self.source, run)
+        destination = await asyncio.to_thread(self.ensure_worktree, run, source)
+        tree = await asyncio.to_thread(
+            self.executor.reviewed_tree, destination, review.parent_sha, review.files, self.store
+        )
+        await asyncio.to_thread(self.verify_worktree, run, destination, review, tree)
+        require_publishable(
+            run,
+            review,
+            (await asyncio.to_thread(self.executor.tree, destination, tree)),
+            self.settings,
+        )
         if authority:
             authority()
         elif run.execution and run.execution.config_generations:
             raise AppError("env_session_lost", "Live environment authority is required.", 409)
-        sha = self.executor.commit(
+        sha = await asyncio.to_thread(
+            self.executor.commit,
             destination,
             tree,
             review.parent_sha,
@@ -731,23 +757,41 @@ class GitPublisher:
         run.progress.commit_tree = tree
         run.progress.artifact_sha = sha
         run.status = "publishing"
-        self.store.save_run(run)
-        current = self.executor.head(destination)
+        await asyncio.to_thread(self.store.save_run, run)
+        current = await asyncio.to_thread(self.executor.head, destination)
         if current == review.parent_sha:
-            self.executor.run(destination, "update-ref", f"refs/heads/{run.branch}", sha, current)
+            (
+                await asyncio.to_thread(
+                    self.executor.run,
+                    destination,
+                    "update-ref",
+                    f"refs/heads/{run.branch}",
+                    sha,
+                    current,
+                )
+            )
         elif current != sha:
             raise AppError("git_collision", "Owned branch changed during commit.", 409)
-        self.executor.run(destination, "read-tree", sha)
-        self.executor.scan_history(destination, sha)
-        self.source(run)
-        self.verify_worktree(run, destination, review, tree)
+        await asyncio.to_thread(self.executor.run, destination, "read-tree", sha)
+        await asyncio.to_thread(self.executor.scan_history, destination, sha)
+        await asyncio.to_thread(self.source, run)
+        await asyncio.to_thread(self.verify_worktree, run, destination, review, tree)
         attestation = require_publishable(
-            run, review, self.executor.tree(destination, tree), self.settings
+            run,
+            review,
+            (await asyncio.to_thread(self.executor.tree, destination, tree)),
+            self.settings,
         )
         if authority:
             authority()
-        self.executor.push(destination, run.target.clone_url, run.branch, sha)
-        remote_sha = self.executor.remote_sha(destination, run.target.clone_url, run.branch)
+        (
+            await asyncio.to_thread(
+                self.executor.push, destination, run.target.clone_url, run.branch, sha
+            )
+        )
+        remote_sha = await asyncio.to_thread(
+            self.executor.remote_sha, destination, run.target.clone_url, run.branch
+        )
         if remote_sha != sha:
             raise AppError(
                 "remote_mismatch", "Remote receipt differs from the approved commit.", 409
@@ -766,5 +810,5 @@ class GitPublisher:
             execution_plan=run.execution.plan.model_copy(deep=True),
         )
         run.result, run.status = result, "ready_for_deployment"
-        self.store.save_run(run)
+        await asyncio.to_thread(self.store.save_run, run)
         return result

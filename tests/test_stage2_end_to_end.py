@@ -1,8 +1,12 @@
 from pathlib import Path
 
 import pytest
-from demo_stage2 import demo_app, response_json, run_demo
+from conftest import settings_for
+from domain_steps import artifact_step
 from fastapi.testclient import TestClient
+from pipeline_fixtures import demo_app, response_json, run_demo
+
+from voxops.storage.mongodb import database_for
 
 
 @pytest.mark.parametrize(("bootstrap", "reject"), [(False, False), (True, False), (False, True)])
@@ -61,9 +65,12 @@ def test_rejected_baseline_and_local_api_protection(tmp_path):
                 },
             )
         )
-        assert client.post(prefix + "/publish").status_code == 409
+        assert artifact_step(client, "publish", prefix.rsplit("/", 1)[-1]).status_code == 409
         assert client.post(prefix + "/source-selection", json={"paths": []}).status_code == 409
-        assert response_json(client.post(prefix + "/execute"))["status"] == "rejected"
+        assert (
+            response_json(artifact_step(client, "advance", prefix.rsplit("/", 1)[-1]))["status"]
+            == "rejected"
+        )
         assert not (source / ".git").exists()
         assert app.state.artifacts.publisher.connection.creations == 0
         assert client.get(prefix, headers={"Origin": "https://hostile.invalid"}).status_code == 403
@@ -109,7 +116,7 @@ def test_selected_baseline_missing_build_input_blocks_generation(tmp_path):
                 },
             )
         )
-        run = response_json(client.post(prefix + "/execute"))
+        run = response_json(artifact_step(client, "advance", prefix.rsplit("/", 1)[-1]))
         assert run["status"] == "blocked" and run["errors"] == ["required_source_missing"]
         assert not run["tasks"] and run["model_usage"]["requests"] == 0
         assert (source / "requirements.txt").exists()
@@ -160,7 +167,7 @@ def test_dirty_snapshot_http_selection(tmp_path):
                 },
             )
         )
-        run = response_json(client.post(prefix + "/execute"))
+        run = response_json(artifact_step(client, "advance", prefix.rsplit("/", 1)[-1]))
         assert run["status"] == "awaiting_review", run["errors"]
         location = Path(app.state.worktrees.inspect(run["worktree_id"]).location)
         assert (location / "main.py").read_text() == original
@@ -175,7 +182,10 @@ def test_project_lock_rejects_second_writer(tmp_path):
     from voxops.core.errors import AppError
     from voxops.storage.artifact_store import ArtifactStore
 
-    first, second = ArtifactStore(tmp_path), ArtifactStore(tmp_path)
+    first, second = (
+        ArtifactStore(database_for(settings_for(tmp_path))),
+        ArtifactStore(database_for(settings_for(tmp_path))),
+    )
     with first.project_lock("a" * 24), pytest.raises(AppError, match="Another operation"):
         with second.project_lock("a" * 24):
             pytest.fail("Second writer acquired the project")

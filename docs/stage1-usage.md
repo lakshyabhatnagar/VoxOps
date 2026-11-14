@@ -54,9 +54,8 @@ untracked files stay untouched. Source dirty state is allowed with a warning: lo
 **not in the worktree**. No automatic snapshots, commits or pushes occur.
 
 Inspect or clean up later using the recorded ID if the harness is interrupted. A changed/unknown
-worktree is refused; dirty known worktrees require explicit discard consent. Registry files contain
-executor-only absolute worktree/source locations; scan files contain no absolute repository path.
-Keep `.voxops` private and out of version control. Worktrees may contain source repository
+worktree is refused; dirty known worktrees require explicit discard consent. MongoDB ownership records contain executor-only temporary worktree/source locations; scan records contain no absolute repository path.
+Keep MongoDB credentials private and configure `VOXOPS_MONGO_URI`. Old local JSON records are not imported. Worktrees may contain source repository
 secrets if those secrets were already committed: Stage 1 does not copy or snapshot local `.env` files.
 
 The API doesn't load a workspace `.env` file automatically. Export the desired settings, or use

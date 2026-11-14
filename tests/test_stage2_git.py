@@ -7,10 +7,11 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from conftest import settings_for
+from domain_steps import advance_candidate
 
 from voxops.artifacts.review import approve_review, require_approval
 from voxops.core.errors import AppError
-from voxops.core.settings import Settings
 from voxops.domain.artifact_models import (
     ArtifactPlan,
     ArtifactProposal,
@@ -26,6 +27,7 @@ from voxops.repository.path_policy import fingerprint
 from voxops.repository.snapshot import capture_source
 from voxops.repository.worktree_manager import WorktreeManager
 from voxops.storage.artifact_store import ArtifactStore, digest
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 
 
@@ -119,11 +121,16 @@ def scenario(tmp_path: Path, committed: bool = True, remote: bool = True):
     bare.mkdir()
     git(bare, "init", "--bare", "--initial-branch=main")
     if committed:
-        (source / "package.json").write_text(json.dumps({
-            "name": "publication-fixture", "private": True,
-            "dependencies": {"react": "19.1.0", "vite": "5.4.21"},
-            "scripts": {"build": "vite build"},
-        }))
+        (source / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "publication-fixture",
+                    "private": True,
+                    "dependencies": {"react": "19.1.0", "vite": "5.4.21"},
+                    "scripts": {"build": "vite build"},
+                }
+            )
+        )
         (source / "index.html").write_text("<html><body>Publication fixture</body></html>")
         git(source, "init", "--initial-branch=main")
         git(source, "config", "user.name", "Fixture")
@@ -133,9 +140,9 @@ def scenario(tmp_path: Path, committed: bool = True, remote: bool = True):
         git(source, "push", str(bare), "main")
     if remote:
         git(source, "remote", "add", "origin", "https://github.com/example/project.git")
-    settings = Settings(allowed_roots=[tmp_path], data_dir=tmp_path / "data")
-    store = ArtifactStore(settings.data_dir)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    settings = settings_for(tmp_path)
+    store = ArtifactStore(database_for(settings))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     manager.root = tmp_path / "worktrees"
     executor = LocalGit(settings, bare)
     connection = FakeGitHub(remote)
@@ -222,7 +229,7 @@ def verify_artifacts(context):
     from voxops.artifacts.service import ArtifactService
 
     settings = context.publisher.settings
-    scans = ScanStore(settings.data_dir)
+    scans = ScanStore(database_for(settings))
     assert context.run.plan.units
     context.run.status = "generating"
     for key in list(context.run.reviews):
@@ -230,14 +237,18 @@ def verify_artifacts(context):
             context.run.reviews.pop(key)
             context.run.approvals.pop(key, None)
     context.store.save_run(context.run)
-    service = ArtifactService(settings, scans, context.manager,
-                              ArtifactGenerator(settings, context.store), context.publisher)
-    service.driver_factory = (
-        lambda unit_id, journal, cancel, session: DemoDocker(settings, journal, cancel, session)
+    service = ArtifactService(
+        settings,
+        scans,
+        context.manager,
+        ArtifactGenerator(settings, context.store),
+        context.publisher,
     )
-    context.run = asyncio.run(service.execute(context.run.run_id))
+    service.driver_factory = lambda unit_id, journal, cancel, session: DemoDocker(
+        settings, journal, cancel, session
+    )
+    context.run = asyncio.run(advance_candidate(service, context.run.run_id))
     assert context.run.execution.status == "passed", context.run.errors
-
 
 
 # Approve an initial source review and then change the initial branch.
@@ -720,7 +731,7 @@ def test_review_diff_preserves_no_final_newline_evidence(tmp_path):
     from voxops.domain.artifact_models import ReviewedFile
     from voxops.repository.snapshot import file_diff
 
-    store = ArtifactStore(tmp_path / "records")
+    store = ArtifactStore(database_for(settings_for(tmp_path)))
     after = b"after"
     key = store.stage(after)
     file = ReviewedFile(

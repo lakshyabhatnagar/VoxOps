@@ -7,6 +7,7 @@ from conftest import committed_repo, git_test, settings_for
 from voxops.core.errors import AppError
 from voxops.repository.git_inspector import inspect_git
 from voxops.repository.worktree_manager import WorktreeManager
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 
 
@@ -18,7 +19,7 @@ def test_worktree_lifecycle_preserves_source(tmp_path):
     (source / "untracked.txt").write_text("private local\n")
     before = (inspect_git(source), git_test(source, "status", "--porcelain"))
     settings = settings_for(tmp_path)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     record = manager.create(str(source))
     location = Path(record.location)
     assert not location.is_relative_to(source)
@@ -32,7 +33,7 @@ def test_worktree_lifecycle_preserves_source(tmp_path):
     assert failure.value.category == "dirty_worktree"
     # Create a new manager after the worktree has been recorded.
     # Check that it recognizes and can clean up the worktree.
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     assert manager.remove(record.id, discard_changes=True).status == "removed"
     assert not location.exists()
     assert not git_test(source, "branch", "--list", record.branch)
@@ -47,7 +48,7 @@ def test_worktree_prerequisites(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     settings = settings_for(tmp_path)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     with pytest.raises(AppError) as failure:
         manager.create(str(empty))
     assert failure.value.category == "uninitialized"
@@ -94,7 +95,7 @@ def test_git_hooks_and_filters_are_disabled(tmp_path):
     hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
     hook.chmod(0o700)
     settings = settings_for(tmp_path)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     record = manager.create(str(source))
     manager.remove(record.id)
     assert not marker.exists()
@@ -105,7 +106,7 @@ def test_git_hooks_and_filters_are_disabled(tmp_path):
 def test_worktree_new_commits_need_discard(tmp_path):
     source = committed_repo(tmp_path)
     settings = settings_for(tmp_path)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     record = manager.create(str(source))
     location = Path(record.location)
     (location / "new.txt").write_text("new committed work")
@@ -134,7 +135,7 @@ def test_worktree_cleanup_retry_and_collision(tmp_path, monkeypatch):
 
     source = committed_repo(tmp_path)
     settings = settings_for(tmp_path)
-    manager = WorktreeManager(settings, ScanStore(settings.data_dir))
+    manager = WorktreeManager(settings, ScanStore(database_for(settings)))
     record = manager.create(str(source))
     original = module.git
 

@@ -4,6 +4,7 @@ from test_stage3_gate import identity, prepared, setup_execution
 from voxops.artifacts.service import ArtifactService
 from voxops.main import create_app
 from voxops.repository.snapshot import capture_source
+from voxops.storage.mongodb import database_for
 from voxops.storage.scan_store import ScanStore
 
 
@@ -18,7 +19,7 @@ def test_form_and_submission_use_real_run_and_local_middleware(tmp_path):
     ctx.store.save_run(ctx.run)
     settings = ctx.publisher.settings
     service = ArtifactService(
-        settings, ScanStore(settings.data_dir), ctx.manager, publisher=ctx.publisher
+        settings, ScanStore(database_for(settings)), ctx.manager, publisher=ctx.publisher
     )
     service.prepare_environment(ctx.run.run_id)
     app = create_app(settings)

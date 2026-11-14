@@ -30,6 +30,7 @@ COMMANDS = {
     "worktree",
     "ls-remote",
     "push",
+    "fetch",
 }
 
 
@@ -200,10 +201,12 @@ class GitExecutor:
 
     # Lists tracked files and their contents at a commit.
     # Reads Git's file records and rejects links, submodules and unsafe paths.
-    def tree(self, path: Path, revision: str) -> dict[str, dict]:
+    def tree(self, path: Path, revision: str, *, cancel=None) -> dict[str, dict]:
         result = {}
         raw = self.run(path, "ls-tree", "-rz", "--full-tree", revision)
         for entry in raw.split(b"\0"):
+            if cancel is not None and cancel.is_set():
+                raise AppError("CANCELLED", "Source acquisition was cancelled.", 409)
             if not entry:
                 continue
             metadata, encoded_path = entry.split(b"\t", 1)

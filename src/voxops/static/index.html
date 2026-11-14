@@ -41,6 +41,25 @@
   </header>
   <main>
     <section class="wide">
+      <h2>GitHub workflow</h2>
+      <label for="workflow-repository">GitHub repository URL</label>
+      <input id="workflow-repository" type="url" placeholder="https://github.com/owner/repository">
+      <label for="workflow-ref">Branch, tag or commit (optional)</label>
+      <input id="workflow-ref" maxlength="200">
+      <label for="workflow-key">Request key (reuse to avoid duplicate submission)</label>
+      <input id="workflow-key" maxlength="128">
+      <label for="workflow-id">Workflow ID</label>
+      <input id="workflow-id" maxlength="32">
+      <div class="actions">
+        <button id="workflow-create" type="button">Start workflow</button>
+        <button id="workflow-status" type="button">Load status</button>
+        <button id="workflow-approve" type="button">Approve displayed review</button>
+        <button id="workflow-reject" type="button">Reject review</button>
+        <button id="workflow-cancel" type="button">Cancel workflow</button>
+      </div>
+      <p class="muted">Status refreshes every three seconds. Use View review below to inspect changes before approving. Missing environment values appear in the existing form below.</p>
+    </section>
+    <section class="wide">
       <h2>Repository</h2>
       <label for="path">Local repository path</label>
       <input id="path" value="." required maxlength="4096" aria-describedby="path-help">
@@ -85,9 +104,7 @@
       <label for="env-run-id">Artifact run ID</label>
       <input id="env-run-id" maxlength="128" required>
       <div class="actions"><button id="env-load" type="button">Load environment form</button>
-        <button id="verify-run" type="button">Run or resume verification</button>
         <button id="verify-status" type="button">Verification status</button>
-        <button id="verify-cancel" type="button">Cancel verification</button>
         <button id="review-load" type="button">View review</button>
       </div>
       <p id="env-status" role="status" aria-live="polite"></p>
@@ -339,8 +356,12 @@
           method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({schema_digest: envDigest, values})
         });
         if (!response.ok) throw new Error();
+        const acceptedDigest = envDigest;
         clearEnvironment();
         envStatus.textContent = 'Environment values accepted.';
+        if (document.getElementById('workflow-id').value.trim()) {
+          await workflowAction('resume', {schema_digest: acceptedDigest});
+        }
       } catch {
         envStatus.textContent = 'Could not submit environment values. Check the values and try again.';
       } finally {
@@ -355,20 +376,77 @@
     });
 
     for (const [id, suffix, method] of [
-      ['verify-run', '/execute', 'POST'], ['verify-status', '/verification', 'GET'],
-      ['verify-cancel', '/verification/cancel', 'POST'], ['review-load', '/review', 'GET']
+      ['verify-status', '/verification', 'GET'], ['review-load', '/review', 'GET']
     ]) document.getElementById(id).addEventListener('click', async () => {
       const runId = document.getElementById('env-run-id').value.trim();
       if (!runId) return;
       try {
         const response = await fetch(`/api/v1/artifact-runs/${encodeURIComponent(runId)}${suffix}`, {method});
         const data = await response.json();
+        if (suffix === '/review' && response.ok && data.review?.review_id === workflowPending?.review_id && data.review?.digest === workflowPending?.digest) displayedWorkflowReview = data.review;
         document.getElementById('response').textContent = JSON.stringify(data, null, 2);
         document.getElementById('status').textContent = `HTTP ${response.status}`;
       } catch {
         document.getElementById('status').textContent = 'Request failed.';
       }
     });
+
+    let workflowPending = null, workflowTimer = null, displayedWorkflowReview = null;
+
+    // Send a workflow command and show safe status without storing application secrets.
+    // Resume carries a form acknowledgement or review decision, never environment values.
+    async function workflowAction(action, resumeBody) {
+      const idField = document.getElementById('workflow-id');
+      let url = '/api/v1/workflows', method = 'GET', body, headers = {};
+      if (action === 'create') {
+        const key = document.getElementById('workflow-key');
+        if (!key.value) key.value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+        method = 'POST';
+        headers['Idempotency-Key'] = key.value;
+        body = {repository_url: document.getElementById('workflow-repository').value.trim(),
+          ref: document.getElementById('workflow-ref').value.trim() || null};
+      } else {
+        if (!idField.value.trim()) return;
+        url += '/' + encodeURIComponent(idField.value.trim());
+        if (action !== 'status') { url += '/' + action; method = 'POST'; body = resumeBody; }
+      }
+      if (body) headers['Content-Type'] = 'application/json';
+      try {
+        const response = await fetch(url, {method, headers, body: body ? JSON.stringify(body) : undefined});
+        const data = await response.json();
+        document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('summary').textContent = summarize(data);
+        document.getElementById('status').textContent = `HTTP ${response.status}`;
+        if (!response.ok) return;
+        idField.value = data.workflow_id;
+        if (data.artifact_run_id) document.getElementById('env-run-id').value = data.artifact_run_id;
+        workflowPending = data.pending?.[0] || null;
+        if (['failed', 'cancelled', 'expired', 'rejected', 'ready_for_deployment', 'waiting_for_env', 'waiting_for_approval'].includes(data.status)) {
+          if (workflowTimer) clearInterval(workflowTimer);
+          workflowTimer = null;
+        } else if (!workflowTimer) workflowTimer = setInterval(() => workflowAction('status'), 3000);
+      } catch {
+        document.getElementById('status').textContent = 'Workflow request failed.';
+      }
+    }
+
+    // Resume only the exact review currently shown by the workflow checkpoint.
+    // The server independently rejects stale identifiers, changed sources and incomplete checks.
+    async function decideWorkflow(decision) {
+      if (!workflowPending?.review_id) return;
+      if (displayedWorkflowReview?.review_id !== workflowPending.review_id || displayedWorkflowReview?.digest !== workflowPending.digest) {
+        document.getElementById('status').textContent = 'Load and inspect the current review before deciding.';
+        return;
+      }
+      await workflowAction('resume', {review_id: workflowPending.review_id,
+        digest: workflowPending.digest, decision});
+    }
+
+    document.getElementById('workflow-create').addEventListener('click', () => workflowAction('create'));
+    document.getElementById('workflow-status').addEventListener('click', () => workflowAction('status'));
+    document.getElementById('workflow-cancel').addEventListener('click', () => workflowAction('cancel'));
+    document.getElementById('workflow-approve').addEventListener('click', () => decideWorkflow('approve'));
+    document.getElementById('workflow-reject').addEventListener('click', () => decideWorkflow('reject'));
 
     document.addEventListener('submit', submit);
   </script>

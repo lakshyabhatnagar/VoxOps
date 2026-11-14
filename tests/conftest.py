@@ -1,10 +1,13 @@
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
 
+import mongomock
 import pytest
 
 from voxops.core.settings import Settings
+from voxops.storage import mongodb
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -59,7 +62,11 @@ def committed_repo(tmp_path: Path) -> Path:
 # Create settings using folders inside the test’s temporary directory.
 # Apply any extra settings supplied by the test.
 def settings_for(tmp_path: Path, **overrides) -> Settings:
-    return Settings(allowed_roots=[tmp_path], data_dir=tmp_path / "records", **overrides)
+    return Settings(
+        allowed_roots=[tmp_path],
+        mongo_database="test_" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:24],
+        **overrides,
+    )
 
 
 # Choose whether the pinned-repository cases start from detection or a saved checkpoint.
@@ -68,3 +75,13 @@ def settings_for(tmp_path: Path, **overrides) -> Settings:
 def pytest_addoption(parser):
     parser.addoption("--repo-stage", choices=["all", "1", "2", "3"], default="all")
     parser.addoption("--repo-real-docker", action="store_true", default=False)
+
+
+@pytest.fixture(autouse=True)
+# Inject one isolated Mongo-compatible client into each fast test.
+# Production always uses PyMongo; no mock or fallback is selected by application code.
+def mongo_client(monkeypatch):
+    client = mongomock.MongoClient()
+    monkeypatch.setattr(mongodb, "MongoClient", lambda *args, **kwargs: client)
+    yield client
+    client.close()
